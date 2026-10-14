@@ -319,7 +319,8 @@ If the `hermes_plugin` hook uses a different session ID than the MemoryProvider,
 ### When to use mnemosyne_remember vs the legacy memory tool
 
 - **ALWAYS use `mnemosyne_remember`** for durable facts, preferences, and insights
-- The legacy `memory` tool is deprecated for durable storage
+- The legacy `memory` tool is deprecated for bulk durable storage: facts, preferences, and insights should go through `mnemosyne_remember`
+- Small always-injected memory files (binding rules, time-sensitive notes, short pointers) remain a supported complementary tier. Mnemosyne is ranked retrieval, so a recalled memory surfaces only when it ranks for the current turn; a standing rule that must be visible every turn ("if X happens, do Y") belongs in the always-injected file, not in Mnemosyne
 - Mnemosyne supports importance scoring (0.0-1.0), global scope, expiry dates, and entity extraction — features the legacy tool doesn't have
 
 ### Memory survives gateway restarts, machine reboots, and Fly.io VM recycles

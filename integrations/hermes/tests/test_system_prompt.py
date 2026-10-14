@@ -40,3 +40,20 @@ def test_system_prompt_tells_agent_to_read_mnemosyne_context_first():
     assert "answer directly" in block
     assert "session_search" in block
     assert "missing, stale, or insufficient" in block
+
+
+def test_system_prompt_keeps_always_injected_memory_files_as_a_tier():
+    """Pin the qualification added in #835.
+
+    The deprecation targets bulk durable storage. Standing rules that must
+    be visible every turn belong in the always-injected memory file, which
+    ranked recall cannot replace.
+    """
+    provider = MnemosyneMemoryProvider()
+    provider._beam = object()
+
+    block = provider.system_prompt_block()
+
+    assert "deprecated for bulk durable storage" in block
+    assert "always-injected memory files" in block
+    assert "supported complementary tier" in block
