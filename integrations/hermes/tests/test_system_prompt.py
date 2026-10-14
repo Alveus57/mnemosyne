@@ -57,3 +57,4 @@ def test_system_prompt_keeps_always_injected_memory_files_as_a_tier():
     assert "deprecated for bulk durable storage" in block
     assert "always-injected memory files" in block
     assert "supported complementary tier" in block
+    assert "store standing rules that must be visible every turn in those files, not in Mnemosyne" in block

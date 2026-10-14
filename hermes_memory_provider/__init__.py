@@ -2081,11 +2081,12 @@ class MnemosyneMemoryProvider(HermesPersonaPromptMixin, MemoryProvider):
             # (working / init-failed-visible / skip-context-silent).
             base = (
                 "# Mnemosyne Memory\n"
-                "Active (native local memory). Use mnemosyne_remember to store ANY "
-                "durable fact, preference, identity, or insight. Use mnemosyne_recall to search. "
+                "Active (native local memory). Use mnemosyne_remember for bulk durable storage: "
+                "facts, preferences, identity, and insights. Use mnemosyne_recall to search. "
                 "Use mnemosyne_shared_* tools for manual shared surface CRUD. "
                 "The legacy memory tool is deprecated for bulk durable storage — Mnemosyne is primary. "
-                "Small always-injected memory files for standing rules that must be visible every turn remain a supported complementary tier.\n"
+                "Small always-injected memory files remain a supported complementary tier: "
+                "store standing rules that must be visible every turn in those files, not in Mnemosyne.\n"
                 "\n"
                 "When a `## Mnemosyne Context` block is injected into the current turn, "
                 "read it before calling retrieval tools. If it answers the user's question, "
