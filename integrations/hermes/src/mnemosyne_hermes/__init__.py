@@ -2438,8 +2438,9 @@ class MnemosyneMemoryProvider(HermesPersonaPromptMixin, MemoryProvider):
             base = (
                 "# Mnemosyne Memory\n"
                 "Active native local memory. Mnemosyne is primary; the legacy memory tool is deprecated for bulk durable storage. "
-                "Small always-injected memory files remain a supported complementary tier: "
-                "store standing rules that must be visible every turn in those files, not in Mnemosyne.\n"
+                "Small standing rules and context anchors may stay in the always-injected memory "
+                "tier, a supported complementary tier (bounded, loaded per session); this exception "
+                "takes precedence over general storage guidance.\n"
                 "Use mnemosyne_recall for durable facts/preferences before asking the user to repeat old context.\n"
                 "Before writing durable memory, choose the narrowest layer: "
                 "mnemosyne_remember for ordinary facts/preferences/insights; "
