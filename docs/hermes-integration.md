@@ -34,7 +34,7 @@ A wrapper's selected side environment is intended to live outside the
 replaceable Hermes runtime. This is a Mnemosyne deployment layout, not a claim
 that Hermes itself enforces or preserves the side environment, plugin
 directory, manifest, preference file, or skill. See
-[Persistent side-venv wrapper mode](#persistent-side-venv-wrapper-mode) for
+[Persistent side-venv wrapper mode](#step-1-install) for
 setup and recovery instructions.
 
 Mnemosyne CI can verify its own path construction, manifest contents, plugin
@@ -81,7 +81,7 @@ symbolic links are privileged operations:
 The three wrapper rows use the same mechanism to keep Mnemosyne independent
 when something outside your control replaces or restricts the Hermes runtime.
 Only the paths differ. See
-[Persistent side-venv wrapper mode](#persistent-side-venv-wrapper-mode) below.
+[Persistent side-venv wrapper mode](#step-1-install) below.
 
 **pip (recommended):**
 
@@ -589,6 +589,62 @@ hermes mnemosyne import --input <backup.json> --dry-run
 ```
 
 This dry run validates the file and reports the import counts using a disposable database clone. It writes neither the active database nor provider audit data. Run the same command without `--dry-run` to perform the side-effecting import.
+
+## Multiple Profiles, Agent Teams, and Group Chats
+
+Mnemosyne is a memory provider. It does not run agents, route messages, or
+decide which agent answers in a chat room. Those are Hermes concerns:
+profiles, the messaging gateway (Telegram, SimpleX, and other platforms), and
+agent dispatch are configured in Hermes. See the
+[Hermes Agent documentation](https://github.com/NousResearch/hermes-agent) for
+profile, gateway, and per-platform setup.
+
+What Mnemosyne controls is where each active provider instance stores and
+looks up memories:
+
+| Concern | Owned by | Mnemosyne setting |
+|---|---|---|
+| Hermes profiles, gateway routing, which agent replies in a room | Hermes | — |
+| Storage home and data directory | Mnemosyne | `MNEMOSYNE_DATA_DIR`, else `$HERMES_HOME/mnemosyne/data` from the process environment, else `~/.hermes/mnemosyne/data` |
+| Private bank per profile | Mnemosyne | `memory.mnemosyne.profile_isolation` (default `false`) |
+| Session vs. cross-session visibility inside a bank | Mnemosyne | `memory.mnemosyne.default_scope` (`session` default, or `global`) |
+| Cross-agent sharing | Mnemosyne | `mnemosyne_shared_*` tools, `shared_surface_path`, `shared_surface_read` |
+
+- **Bank.** With `profile_isolation: false`, every provider instance that
+  resolves the same data directory uses the same `default` bank. With
+  `profile_isolation: true`, the provider uses a bank named after the Hermes
+  agent identity or, failing that, the basename of the profile's Hermes home,
+  stored under `data/banks/<name>/mnemosyne.db`. The base home (`~/.hermes`,
+  `hermes`, `default`) still maps to the `default` bank.
+- **Session.** When Hermes supplies a gateway session key (for example, per
+  chat or topic), the provider uses it as the session; otherwise it uses the
+  Hermes session id. `session`-scoped memories are recalled within that
+  session; `global`-scoped memories surface across sessions of the same bank.
+- **Shared surface.** A separate database for memories that several profiles
+  are meant to share, written and read through the `mnemosyne_shared_*` tools.
+  `shared_surface_read: true` also merges surface results into
+  `mnemosyne_recall`. Its default path is relative to the provider's code
+  location, so profiles that should share a surface should each set the same
+  absolute `shared_surface_path`.
+
+Two setups are commonly confused:
+
+- **Several people talking to one assistant** (one Hermes profile in a group
+  chat): there is one provider instance and one bank. What each chat or topic
+  sees follows the session and scope rules above; Mnemosyne does not keep a
+  separate memory per chat participant.
+- **Several profile agents in one room** (an agent team): each agent is its
+  own Hermes profile with its own `memory.provider: mnemosyne` config. Enable
+  `profile_isolation` in each profile for private memories, and use the
+  shared surface for what the team should share. Being in the same chat room
+  does not by itself share or separate memory.
+
+Installing or linking one Mnemosyne plugin for several profiles (see
+[Multiple profiles, one side venv](#step-1-install)) shares
+code only. It does not define shared memory; the settings above do. Confirm
+the active provider in each profile with `hermes --profile <name> memory
+status`; the `mnemosyne_diagnose` tool reports that profile's active database
+path and whether profile isolation is enabled.
 
 ## Data Location
 
