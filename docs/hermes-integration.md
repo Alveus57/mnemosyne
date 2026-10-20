@@ -660,8 +660,9 @@ embedding model on first use.
 - **Data directory.** There is no single resolver for every consumer. When
   Hermes supplies `hermes_home` to the installable provider
   (`mnemosyne-hermes`), the provider builds an explicit private path under
-  `<hermes_home>/mnemosyne/data/`, so each profile home already selects its own
-  store. Without a supplied home, and for the Mnemosyne Core library, CLI, and
+  `<hermes_home>/mnemosyne/data/`, so profiles with separate Hermes homes
+  already select separate stores, while profiles that share one home share
+  one store unless `profile_isolation` is enabled. Without a supplied home, and for the Mnemosyne Core library, CLI, and
   the root `hermes_memory_provider`, the environment decides:
   `MNEMOSYNE_DATA_DIR`, else `$HERMES_HOME/mnemosyne/data`, else
   `~/.hermes/mnemosyne/data`. Run `mnemosyne_diagnose` in each profile to see
@@ -674,7 +675,7 @@ embedding model on first use.
   `default`) still maps to the `default` bank.
 - **Before enabling `profile_isolation`.** Separate profile homes or data
   directories can already give each profile a separate store, so you may not
-  need it. Enabling it only selects a different bank: existing memories are
+  need it; it matters mainly when several profiles share one Hermes home. Enabling it only selects a different bank: existing memories are
   **not** migrated from the current bank, so a profile can start with empty
   memory even though nothing was lost. It is a way to choose a bank, not a
   general ownership or privacy repair for memories already written.
