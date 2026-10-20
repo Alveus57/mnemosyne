@@ -600,44 +600,69 @@ agent dispatch are configured in Hermes. See the
 profile, gateway, and per-platform setup.
 
 What Mnemosyne controls is where each active provider instance stores and
-looks up memories:
+looks up memories. These memories live in local SQLite files; Mnemosyne needs
+no external database or network service. Network access happens only for
+configured sync or remote services, and for the one-time download of the local
+embedding model on first use.
 
 | Concern | Owned by | Mnemosyne setting |
 |---|---|---|
-| Hermes profiles, gateway routing, which agent replies in a room | Hermes | — |
-| Storage home and data directory | Mnemosyne | `MNEMOSYNE_DATA_DIR`, else `$HERMES_HOME/mnemosyne/data` from the process environment, else `~/.hermes/mnemosyne/data` |
-| Private bank per profile | Mnemosyne | `memory.mnemosyne.profile_isolation` (default `false`) |
+| Hermes profiles, gateway routing, gateway session keys, which agent replies in a room | Hermes | — |
+| Private database path | Mnemosyne | Depends on the provider path; see **Data directory** below |
+| Named bank per profile | Mnemosyne | `memory.mnemosyne.profile_isolation` (default `false`) |
 | Session vs. cross-session visibility inside a bank | Mnemosyne | `memory.mnemosyne.default_scope` (`session` default, or `global`) |
 | Cross-agent sharing | Mnemosyne | `mnemosyne_shared_*` tools, `shared_surface_path`, `shared_surface_read` |
 
-- **Bank.** With `profile_isolation: false`, every provider instance that
-  resolves the same data directory uses the same `default` bank. With
-  `profile_isolation: true`, the provider uses a bank named after the Hermes
-  agent identity or, failing that, the basename of the profile's Hermes home,
-  stored under `data/banks/<name>/mnemosyne.db`. The base home (`~/.hermes`,
-  `hermes`, `default`) still maps to the `default` bank.
-- **Session.** When Hermes supplies a gateway session key (for example, per
-  chat or topic), the provider uses it as the session; otherwise it uses the
-  Hermes session id. `session`-scoped memories are recalled within that
-  session; `global`-scoped memories surface across sessions of the same bank.
+- **Data directory.** There is no single resolver for every consumer. When
+  Hermes supplies `hermes_home` to the installable provider
+  (`mnemosyne-hermes`), the provider builds an explicit private path under
+  `<hermes_home>/mnemosyne/data/`, so each profile home already selects its own
+  store. Without a supplied home, and for the Mnemosyne Core library, CLI, and
+  the root `hermes_memory_provider`, the environment decides:
+  `MNEMOSYNE_DATA_DIR`, else `$HERMES_HOME/mnemosyne/data`, else
+  `~/.hermes/mnemosyne/data`. Run `mnemosyne_diagnose` in each profile to see
+  which database it actually uses.
+- **Bank.** With `profile_isolation: false`, each provider instance uses the
+  `default` bank of its data directory. With `profile_isolation: true`, the
+  provider selects a bank named after the Hermes agent identity or, failing
+  that, the basename of the profile's Hermes home, stored under
+  `data/banks/<name>/mnemosyne.db`. The base home (`~/.hermes`, `hermes`,
+  `default`) still maps to the `default` bank.
+- **Before enabling `profile_isolation`.** Separate profile homes or data
+  directories can already give each profile a separate store, so you may not
+  need it. Enabling it only selects a different bank: existing memories are
+  **not** migrated from the current bank, so a profile can start with empty
+  memory even though nothing was lost. It is a way to choose a bank, not a
+  general ownership or privacy repair for memories already written.
+- **Session.** When Hermes supplies a gateway session key, the provider uses
+  it as the session; otherwise it uses the Hermes session id. `session`-scoped
+  memories are recalled within that session; `global`-scoped memories surface
+  across all sessions of the same bank.
 - **Shared surface.** A separate database for memories that several profiles
   are meant to share, written and read through the `mnemosyne_shared_*` tools.
   `shared_surface_read: true` also merges surface results into
-  `mnemosyne_recall`. Its default path is relative to the provider's code
-  location, so profiles that should share a surface should each set the same
+  `mnemosyne_recall`. The default path differs by provider: the installable
+  provider uses `~/.mnemosyne/data/shared/mnemosyne.db`, while the root
+  `hermes_memory_provider` uses `data/shared/mnemosyne.db` relative to its own
+  code location. Profiles that should share a surface should each set the same
   absolute `shared_surface_path`.
 
 Two setups are commonly confused:
 
 - **Several people talking to one assistant** (one Hermes profile in a group
-  chat): there is one provider instance and one bank. What each chat or topic
-  sees follows the session and scope rules above; Mnemosyne does not keep a
-  separate memory per chat participant.
+  chat): there is one provider instance and one bank. Gateway session keys
+  come from Hermes: with its default `group_sessions_per_user: true`,
+  non-threaded group chats get a per-participant session key when a
+  participant ID is available, so `session`-scoped memories can be separate
+  per participant within that one bank. Threads, `group_sessions_per_user:
+  false`, or a missing participant ID change the session key. `global`-scoped
+  memories are always shared across the whole bank.
 - **Several profile agents in one room** (an agent team): each agent is its
-  own Hermes profile with its own `memory.provider: mnemosyne` config. Enable
-  `profile_isolation` in each profile for private memories, and use the
-  shared surface for what the team should share. Being in the same chat room
-  does not by itself share or separate memory.
+  own Hermes profile with its own `memory.provider: mnemosyne` config, and so
+  its own store when the profile homes differ (see **Data directory**). Use
+  `profile_isolation` only if you want named banks, and use the shared surface
+  for what the team should share. Being in the same chat room does not by
+  itself share or separate memory.
 
 Installing or linking one Mnemosyne plugin for several profiles (see
 [Multiple profiles, one side venv](#step-1-install)) shares
