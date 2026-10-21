@@ -294,6 +294,58 @@ def _get_connection(db_path = None) -> sqlite3.Connection:
     return _thread_local.conn
 
 
+def close_thread_connection(db_path=None, *, allow_main_thread: bool = False) -> bool:
+    """Close this thread's cached SQLite connection.
+
+    Explicit, opt-in inverse of :func:`_get_connection`. It exists for callers
+    that can *assert* the cached handle has no other owner: a short-lived
+    worker thread that opened the connection, used it, and holds no
+    ``Mnemosyne``/``BeamMemory`` instance or sub-store alias (``annotations``,
+    ``canonical``, ``media``, ``episodic_graph``, ``veracity_consolidator``)
+    built on the same handle.
+
+    The library cannot verify that assertion. Connections are created with
+    ``check_same_thread=False`` and instances keep ``self.conn``, so a retained
+    instance may legitimately outlive the thread that created it. Closing on
+    thread exit, cache displacement or collection would therefore release a
+    handle a live alias may still use. Only an explicit call from the owner may
+    release it (mnemosyne#1163).
+
+    Args:
+        db_path: Database whose cached connection to close. Defaults to the
+            configured default database; a cached connection for any other
+            path is left untouched.
+        allow_main_thread: Refuse on the main thread by default, because that
+            cache is process-lifetime and shared with long-lived singletons.
+
+    Returns:
+        True if at least one cached connection was closed, False if this
+        thread held no matching connection or the call was refused.
+    """
+    if threading.current_thread() is threading.main_thread() and not allow_main_thread:
+        logger.debug("close_thread_connection refused on the main thread")
+        return False
+
+    path = (Path(db_path) if db_path else _default_db_path()).expanduser().resolve()
+    wanted = str(path)
+
+    closed = False
+    # _get_connection publishes core's handle into beam's cache, so one object
+    # can be reachable from both thread-locals. Close is idempotent per handle.
+    for local in (_thread_local, beam_module._thread_local):
+        connection = getattr(local, "conn", None)
+        if connection is None or getattr(local, "db_path", None) != wanted:
+            continue
+        try:
+            connection.close()
+            closed = True
+        except Exception:
+            logger.debug("cached connection close failed", exc_info=True)
+        local.conn = None
+        local.db_path = None
+    return closed
+
+
 def _close_dry_run_clone(
     thread_local_states: List[tuple[Any, Dict[str, Any]]],
     clone_store_connections: List[Any],

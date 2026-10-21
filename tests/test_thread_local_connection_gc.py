@@ -5,6 +5,7 @@ import importlib
 import os
 from pathlib import Path
 import queue
+import sqlite3
 import threading
 
 import pytest
@@ -145,3 +146,140 @@ def test_live_thread_database_switches_keep_fds_bounded(module_name, tmp_path):
         if gc_was_enabled:
             gc.enable()
         gc.collect()
+
+
+# ── Explicit release contract (mnemosyne#1163) ───────────────────────────────
+
+
+@pytest.mark.parametrize("module_name", _CONNECTION_MODULES)
+def test_close_thread_connection_releases_the_handle_deterministically(
+    module_name, tmp_path
+):
+    """The owning thread releases its handle without waiting for collection."""
+    if not Path("/proc/self/fd").exists():
+        pytest.skip("open-descriptor assertions require /proc")
+    module = importlib.import_module(module_name)
+    db_path = tmp_path / "explicit-close.db"
+    observed = queue.Queue()
+
+    def open_use_and_close():
+        module._get_connection(db_path).execute("SELECT 1").fetchone()
+        before = _database_fd_count(db_path)
+        closed = module.close_thread_connection(db_path)
+        observed.put((before, closed, _database_fd_count(db_path)))
+
+    worker = threading.Thread(target=open_use_and_close)
+    worker.start()
+    worker.join()
+    before, closed, after = observed.get_nowait()
+
+    assert before >= 1
+    assert closed is True
+    assert after == 0
+
+
+@pytest.mark.parametrize("module_name", _CONNECTION_MODULES)
+def test_connection_is_recreated_after_explicit_close(module_name, tmp_path):
+    """A released thread-local must reconnect on next use, not stay poisoned."""
+    module = importlib.import_module(module_name)
+    db_path = tmp_path / "reopen.db"
+    observed = queue.Queue()
+
+    def close_then_reuse():
+        first = module._get_connection(db_path)
+        assert module.close_thread_connection(db_path) is True
+        second = module._get_connection(db_path)
+        observed.put(
+            (second is not first, second.execute("SELECT 1").fetchone()[0])
+        )
+
+    worker = threading.Thread(target=close_then_reuse)
+    worker.start()
+    worker.join()
+
+    reopened, value = observed.get_nowait()
+    assert reopened is True
+    assert value == 1
+
+
+def test_close_thread_connection_refuses_the_main_thread(tmp_path):
+    """The main-thread cache is process-lifetime and must opt in explicitly."""
+    from mnemosyne.core.memory import _get_connection, close_thread_connection
+
+    db_path = tmp_path / "main-thread.db"
+    connection = _get_connection(db_path)
+
+    assert close_thread_connection(db_path) is False
+    assert connection.execute("SELECT 1").fetchone()[0] == 1
+
+    assert close_thread_connection(db_path, allow_main_thread=True) is True
+    with pytest.raises(sqlite3.ProgrammingError):
+        connection.execute("SELECT 1")
+
+
+def test_close_thread_connection_leaves_other_paths_cached(tmp_path):
+    """Releasing one database must not displace another database's cache."""
+    from mnemosyne.core.memory import _get_connection, close_thread_connection
+
+    kept_path = tmp_path / "kept.db"
+    other_path = tmp_path / "other.db"
+    observed = queue.Queue()
+
+    def close_unrelated_path():
+        kept = _get_connection(kept_path)
+        closed = close_thread_connection(other_path)
+        observed.put((closed, kept.execute("SELECT 1").fetchone()[0]))
+        close_thread_connection(kept_path)
+
+    worker = threading.Thread(target=close_unrelated_path)
+    worker.start()
+    worker.join()
+
+    closed, value = observed.get_nowait()
+    assert closed is False
+    assert value == 1
+
+
+def test_retained_instance_alias_stays_usable_after_creator_thread_exits(tmp_path):
+    """Owner lifetime is not creator-thread lifetime.
+
+    BeamMemory keeps ``self.conn`` and hands the same handle to five sub-stores,
+    and connections are opened with ``check_same_thread=False``. A retained
+    instance must therefore survive its creating thread's exit, its own
+    collection, and unrelated connection churn -- the difference between an
+    explicit release by the owner and a release inferred from thread death.
+    """
+    from mnemosyne.core.beam import BeamMemory
+
+    db_path = tmp_path / "retained-alias.db"
+    churn_path = tmp_path / "churn.db"
+    held = {}
+
+    def create_and_retain():
+        beam = BeamMemory(session_id="alias-test", db_path=db_path)
+        held["beam"] = beam
+        held["substores_share_conn"] = all(
+            store.conn is beam.conn
+            for store in (
+                beam.annotations,
+                beam.canonical,
+                beam.media,
+                beam.episodic_graph,
+                beam.veracity_consolidator,
+            )
+        )
+
+    creator = threading.Thread(target=create_and_retain)
+    creator.start()
+    creator.join()
+    assert not creator.is_alive()
+
+    beam_module = importlib.import_module("mnemosyne.core.beam")
+    gc.collect()
+    for _ in range(8):
+        _open_on_new_thread(beam_module, churn_path)
+
+    assert held["substores_share_conn"] is True
+    retained = held["beam"]
+    assert retained.conn.execute("SELECT 1").fetchone()[0] == 1
+    assert retained.annotations.conn.execute("SELECT 1").fetchone()[0] == 1

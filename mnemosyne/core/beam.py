@@ -1244,6 +1244,18 @@ def _get_connection(db_path: Path = None) -> sqlite3.Connection:
     return _thread_local.conn
 
 
+def close_thread_connection(db_path=None, *, allow_main_thread: bool = False) -> bool:
+    """Close this thread's cached connection (see ``mnemosyne.core.memory``).
+
+    The core connection cache publishes its handle into this module's
+    thread-local on every lookup, so both caches must be released together;
+    the core helper owns that logic and is imported lazily to avoid a cycle.
+    """
+    from mnemosyne.core.memory import close_thread_connection as _close
+
+    return _close(db_path, allow_main_thread=allow_main_thread)
+
+
 def _detect_vec_type(conn: sqlite3.Connection) -> str:
     """
     Detect whether sqlite-vec supports int8/bit.
