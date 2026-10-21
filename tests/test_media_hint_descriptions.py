@@ -1,4 +1,4 @@
-"""Public hint contracts, extracted without importing either provider surface."""
+"""Public hint contracts, extracted without importing any provider surface."""
 
 import ast
 from pathlib import Path
@@ -11,6 +11,7 @@ _ROOT = Path(__file__).resolve().parents[1]
 _SURFACES = (
     "mnemosyne/tool_schemas.py",
     "integrations/hermes/src/mnemosyne_hermes/tools.py",
+    "hermes_memory_provider/__init__.py",
 )
 
 
@@ -45,5 +46,6 @@ def test_remember_media_hint_documents_the_image_override_contract(surface):
     assert re.search(r"empty or omitted hint.*configured.*default.*template", text)
 
 
-def test_both_hint_surfaces_have_matching_descriptions():
-    assert _hint_description(_SURFACES[0]) == _hint_description(_SURFACES[1])
+def test_all_hint_surfaces_have_matching_descriptions():
+    descriptions = [_hint_description(surface) for surface in _SURFACES]
+    assert all(description == descriptions[0] for description in descriptions)
