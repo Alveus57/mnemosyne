@@ -283,3 +283,53 @@ def test_retained_instance_alias_stays_usable_after_creator_thread_exits(tmp_pat
     retained = held["beam"]
     assert retained.conn.execute("SELECT 1").fetchone()[0] == 1
     assert retained.annotations.conn.execute("SELECT 1").fetchone()[0] == 1
+
+
+class _CloseFailingConnection(sqlite3.Connection):
+    """Connection whose close can be made to fail on demand."""
+
+    fail_close = True
+
+    def close(self):
+        if type(self).fail_close:
+            raise sqlite3.OperationalError("simulated close failure")
+        return super().close()
+
+
+def test_failed_close_keeps_the_handle_cached_for_retry(tmp_path):
+    """A failed close must not drop the only reference to a live handle.
+
+    ``sqlite3.Connection.close()`` can raise, and the handle is still usable
+    when it does. Clearing the thread-local anyway would hide a live handle and
+    leave the caller no way to retry, so the entry must survive until a later
+    release succeeds.
+    """
+    from mnemosyne.core import memory as memory_module
+
+    db_path = (tmp_path / "close-failure.db").resolve()
+    observed = queue.Queue()
+
+    def close_with_failure():
+        beam_module = importlib.import_module("mnemosyne.core.beam")
+        connection = sqlite3.connect(str(db_path), factory=_CloseFailingConnection)
+        memory_module._thread_local.conn = connection
+        memory_module._thread_local.db_path = str(db_path)
+        try:
+            first = memory_module.close_thread_connection(db_path)
+            still_cached = memory_module._thread_local.conn is connection
+            usable = connection.execute("SELECT 1").fetchone()[0]
+
+            _CloseFailingConnection.fail_close = False
+            second = memory_module.close_thread_connection(db_path)
+            cleared = memory_module._thread_local.conn is None
+            observed.put((first, still_cached, usable, second, cleared))
+        finally:
+            _CloseFailingConnection.fail_close = False
+            beam_module._thread_local.conn = None
+            beam_module._thread_local.db_path = None
+
+    worker = threading.Thread(target=close_with_failure)
+    worker.start()
+    worker.join()
+
+    assert observed.get_nowait() == (False, True, 1, True, True)

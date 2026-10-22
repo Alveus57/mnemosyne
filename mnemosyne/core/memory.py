@@ -298,11 +298,19 @@ def close_thread_connection(db_path=None, *, allow_main_thread: bool = False) ->
     """Close this thread's cached SQLite connection.
 
     Explicit, opt-in inverse of :func:`_get_connection`. It exists for callers
-    that can *assert* the cached handle has no other owner: a short-lived
-    worker thread that opened the connection, used it, and holds no
-    ``Mnemosyne``/``BeamMemory`` instance or sub-store alias (``annotations``,
-    ``canonical``, ``media``, ``episodic_graph``, ``veracity_consolidator``)
-    built on the same handle.
+    that can *assert* no consumer will use the cached handle again: a
+    short-lived worker thread that opened the connection, finished with it, and
+    has abandoned every ``Mnemosyne``/``BeamMemory`` instance and sub-store
+    alias (``annotations``, ``canonical``, ``media``, ``episodic_graph``,
+    ``veracity_consolidator``) built on the same handle.
+
+    "Abandoned" means no further use, not that no reference exists. A local
+    variable may still point at the instance graph after the worker's last
+    statement -- for example while a ``finally`` block runs -- provided that
+    graph is irrevocably retired. The release also assumes no open cursor,
+    statement-cache entry or deferred work will touch the handle afterwards,
+    and it covers every thread-local cache to which :func:`_get_connection`
+    publishes (this module and ``mnemosyne.core.beam``).
 
     The library cannot verify that assertion. Connections are created with
     ``check_same_thread=False`` and instances keep ``self.conn``, so a retained
@@ -319,8 +327,11 @@ def close_thread_connection(db_path=None, *, allow_main_thread: bool = False) ->
             cache is process-lifetime and shared with long-lived singletons.
 
     Returns:
-        True if at least one cached connection was closed, False if this
-        thread held no matching connection or the call was refused.
+        True if at least one cached connection was closed. False if this
+        thread held no matching connection, the call was refused, or every
+        matching close failed. A handle whose ``close()`` raised is left in its
+        cache: it is still usable, so dropping the reference here would discard
+        the caller's only retry authority. A later call may try again.
     """
     if threading.current_thread() is threading.main_thread() and not allow_main_thread:
         logger.debug("close_thread_connection refused on the main thread")
@@ -338,9 +349,13 @@ def close_thread_connection(db_path=None, *, allow_main_thread: bool = False) ->
             continue
         try:
             connection.close()
-            closed = True
         except Exception:
-            logger.debug("cached connection close failed", exc_info=True)
+            # A failed close (for example a subclass raising from an overridden
+            # close) leaves the handle usable. Keeping the cache entry preserves
+            # the only retry authority; clearing it would hide a live handle.
+            logger.warning("cached connection close failed; handle retained", exc_info=True)
+            continue
+        closed = True
         local.conn = None
         local.db_path = None
     return closed

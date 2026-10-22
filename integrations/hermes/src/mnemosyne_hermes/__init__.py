@@ -266,9 +266,12 @@ _provider_lock = threading.Lock()
 def _release_thread_connection(db_path=None) -> None:
     """Release this worker thread's cached SQLite handle (mnemosyne#1163).
 
-    Valid only for a worker that created its own memory instance and handed it
-    to nothing else -- the provider's per-session beams are retained on purpose
-    and must never be released here. The core helper refuses the main thread.
+    Valid only for a worker that created its own memory instance, finished with
+    it, and will never use it again. The local variable may still reference the
+    instance graph when this runs -- the call sits in ``finally`` -- so the
+    precondition is no further use, not no remaining reference. The provider's
+    per-session beams are retained on purpose and must never be released here.
+    The core helper refuses the main thread.
     """
     try:
         from mnemosyne.core.memory import close_thread_connection
