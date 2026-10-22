@@ -654,7 +654,7 @@ embedding model on first use.
 | Hermes profiles, gateway routing, gateway session keys, which agent replies in a room | Hermes | — |
 | Private database path | Mnemosyne | Depends on the provider path; see **Data directory** below |
 | Named bank per profile | Mnemosyne | `memory.mnemosyne.profile_isolation` (default `false`) |
-| Session vs. cross-session visibility inside a bank | Mnemosyne | `memory.mnemosyne.default_scope` (`session` default, or `global`) |
+| Session vs. cross-session visibility inside a bank | Mnemosyne | `memory.mnemosyne.default_scope` (`session` default, or `global`); `cross_session` / `MNEMOSYNE_CROSS_SESSION` (default `false`) removes the session filter on recall |
 | Cross-agent sharing | Mnemosyne | `mnemosyne_shared_*` tools, `shared_surface_path`, `shared_surface_read` |
 
 - **Data directory.** There is no single resolver for every consumer. When
@@ -681,8 +681,13 @@ embedding model on first use.
   general ownership or privacy repair for memories already written.
 - **Session.** When Hermes supplies a gateway session key, the provider uses
   it as the session; otherwise it uses the Hermes session id. `session`-scoped
-  memories are recalled within that session; `global`-scoped memories surface
-  across all sessions of the same bank.
+  memories are recalled within that session by default; `global`-scoped
+  memories surface across all sessions of the same bank. This is default
+  recall behavior, not an unconditional boundary: with `cross_session=true`
+  (or `MNEMOSYNE_CROSS_SESSION=1`), recall drops the session filter and can
+  return `session`-scoped memories from other sessions of the same bank, so
+  separate session keys (for example, per participant) do not guarantee
+  isolation under that override.
 - **Shared surface.** A separate database for memories that several profiles
   are meant to share, written and read through the `mnemosyne_shared_*` tools.
   `shared_surface_read: true` also merges surface results into
