@@ -662,7 +662,8 @@ embedding model on first use.
   (`mnemosyne-hermes`), the provider builds an explicit private path under
   `<hermes_home>/mnemosyne/data/`, so profiles with separate Hermes homes
   already select separate stores, while profiles that share one home share
-  one store unless `profile_isolation` is enabled. Without a supplied home, and for the Mnemosyne Core library, CLI, and
+  one store unless `profile_isolation` is enabled and their resolved bank names
+  differ. Without a supplied home, and for the Mnemosyne Core library, CLI, and
   the root `hermes_memory_provider`, the environment decides:
   `MNEMOSYNE_DATA_DIR`, else `$HERMES_HOME/mnemosyne/data`, else
   `~/.hermes/mnemosyne/data`. Run `mnemosyne_diagnose` in each profile to see
