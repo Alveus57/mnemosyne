@@ -6,7 +6,6 @@ Comprehensive backup, restore, and integrity verification for Mnemosyne.
 
 import contextlib
 import gzip
-import io
 import os
 import json
 import hashlib
@@ -198,31 +197,33 @@ def create_backup(db_path: Path = None, backup_dir: Path = None) -> Dict:
     meta_path = backup_path.with_suffix(".gz.json")
     staged_meta_path = staged_backup_path.with_suffix(".gz.json")
 
+    staged_sqlite = None
     try:
-        # Use sqlite3 online backup API instead of shutil.copyfileobj.
+        # Use sqlite3 online backup API to copy into a temporary file
+        # database, then gzip the resulting SQLite database bytes.
         # sqlite3.backup() is lock-aware (acquires read-lock), includes
-        # uncommitted WAL frames, and is atomic — it won't produce a torn
-        # file if a checkpoint runs partway through. The old copyfileobj
-        # approach only copied the .db file, missed .db-wal frames, and
-        # could produce corrupted backups under concurrent write load.
+        # uncommitted WAL frames, is atomic, and preserves FTS5/vec0
+        # virtual tables without iterdump syntax conflicts (#640).
+        staged_sqlite = staged_backup_path.with_suffix(".tmp.db")
         src = sqlite3.connect(str(db_path))
         try:
             _load_sqlite_vec(src)
-            dst = sqlite3.connect(":memory:")
+            dst = sqlite3.connect(str(staged_sqlite))
             try:
                 _load_sqlite_vec(dst)
                 src.backup(dst)
-
-                # Serialize the in-memory backup → gzip → disk
-                buf = io.BytesIO()
-                for line in dst.iterdump():
-                    buf.write((line + "\n").encode("utf-8"))
             finally:
                 dst.close()
         finally:
             src.close()
 
-        dump_bytes = buf.getvalue()
+        with open(staged_sqlite, "rb") as raw_in:
+            dump_bytes = raw_in.read()
+        try:
+            staged_sqlite.unlink()
+        except OSError:
+            pass
+
         with open(staged_backup_path, "wb") as raw_out:
             with gzip.GzipFile(fileobj=raw_out, mode="wb") as f_out:
                 f_out.write(dump_bytes)
@@ -244,6 +245,7 @@ def create_backup(db_path: Path = None, backup_dir: Path = None) -> Dict:
             "backup_checksum": backup_checksum,
             "dump_checksum": dump_checksum,
             "compressed": True,
+            "format": "sqlite3",
             "source_db": str(_resolved(db_path)),
         }
 
@@ -266,11 +268,12 @@ def create_backup(db_path: Path = None, backup_dir: Path = None) -> Dict:
             **metadata,
         }
     except BaseException:
-        for stale in (staged_backup_path, staged_meta_path, reservation_path):
-            try:
-                stale.unlink()
-            except OSError:
-                pass
+        for stale in (staged_backup_path, staged_meta_path, reservation_path, staged_sqlite):
+            if stale is not None:
+                try:
+                    stale.unlink()
+                except OSError:
+                    pass
         raise
 
 
@@ -494,35 +497,64 @@ def restore_backup(backup_path: Path, db_path: Path = None) -> Dict:
     preserved_existed = db_path.exists()
     try:
         # --- 4. Rebuild into the staged DB and validate ------------------
-        tmp_db = sqlite3.connect(str(staged_path))
-        _load_sqlite_vec(tmp_db)
-        tmp_db.set_authorizer(
-            lambda action, *_args: (
-                sqlite3.SQLITE_DENY
-                if action == sqlite3.SQLITE_ATTACH
-                else sqlite3.SQLITE_OK
-            )
-        )
-        try:
-            tmp_db.executescript(dump_bytes.decode("utf-8"))
-            integrity = tmp_db.execute("PRAGMA integrity_check").fetchone()[0]
-            if integrity != "ok":
-                raise RuntimeError(
-                    f"Staged restore failed integrity_check: {integrity}. "
-                    f"Refusing to replace target."
-                )
-            tmp_db.commit()
+        if dump_bytes.startswith(b"SQLite format 3\x00"):
+            # Binary SQLite restore path (#640): write decompressed SQLite bytes
+            # directly to staged_path, load sqlite-vec, and verify integrity.
+            with open(staged_path, "wb") as f_staged:
+                f_staged.write(dump_bytes)
+                _flush_and_fsync(f_staged)
+
+            tmp_db = sqlite3.connect(str(staged_path))
+            _load_sqlite_vec(tmp_db)
             try:
-                tmp_db.execute("PRAGMA wal_checkpoint(TRUNCATE)")
-            except sqlite3.OperationalError:
-                pass
-            tmp_db.close()
-        except Exception:
-            try:
+                integrity = tmp_db.execute("PRAGMA integrity_check").fetchone()[0]
+                if integrity != "ok":
+                    raise RuntimeError(
+                        f"Staged restore failed integrity_check: {integrity}. "
+                        f"Refusing to replace target."
+                    )
+                try:
+                    tmp_db.execute("PRAGMA wal_checkpoint(TRUNCATE)")
+                except sqlite3.OperationalError:
+                    pass
                 tmp_db.close()
             except Exception:
-                pass
-            raise
+                try:
+                    tmp_db.close()
+                except Exception:
+                    pass
+                raise
+        else:
+            # Legacy SQL text dump fallback: replay via executescript
+            tmp_db = sqlite3.connect(str(staged_path))
+            _load_sqlite_vec(tmp_db)
+            tmp_db.set_authorizer(
+                lambda action, *_args: (
+                    sqlite3.SQLITE_DENY
+                    if action == sqlite3.SQLITE_ATTACH
+                    else sqlite3.SQLITE_OK
+                )
+            )
+            try:
+                tmp_db.executescript(dump_bytes.decode("utf-8"))
+                integrity = tmp_db.execute("PRAGMA integrity_check").fetchone()[0]
+                if integrity != "ok":
+                    raise RuntimeError(
+                        f"Staged restore failed integrity_check: {integrity}. "
+                        f"Refusing to replace target."
+                    )
+                tmp_db.commit()
+                try:
+                    tmp_db.execute("PRAGMA wal_checkpoint(TRUNCATE)")
+                except sqlite3.OperationalError:
+                    pass
+                tmp_db.close()
+            except Exception:
+                try:
+                    tmp_db.close()
+                except Exception:
+                    pass
+                raise
 
         _fsync_path(staged_path)
 

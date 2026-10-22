@@ -60,8 +60,19 @@ def _labels(path: Path) -> list[str]:
 
 
 def _dump(path) -> str:
-    with gzip.open(path, "rt", encoding="utf-8") as f:
-        return f.read()
+    decompressed = gzip.decompress(Path(path).read_bytes())
+    if decompressed.startswith(b"SQLite format 3\x00"):
+        import tempfile
+        with tempfile.NamedTemporaryFile(suffix=".db") as tmp:
+            tmp.write(decompressed)
+            tmp.flush()
+            conn = sqlite3.connect(tmp.name)
+            try:
+                lines = list(conn.iterdump())
+                return "\n".join(lines)
+            finally:
+                conn.close()
+    return decompressed.decode("utf-8")
 
 
 def _store_dir(backup_root: Path, db: Path) -> Path:
