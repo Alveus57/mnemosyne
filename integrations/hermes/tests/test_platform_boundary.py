@@ -53,11 +53,13 @@ def wrappers(tmp_path):
     return wrapper
 
 
-@pytest.mark.parametrize("platform", ["android", "emscripten"])
+@pytest.mark.parametrize("platform, legacy_android", [
+    ("android", False), ("emscripten", False), ("linux", True),
+], ids=["android", "emscripten", "legacy_android"])
 @pytest.mark.parametrize("dependencies", ["absent", "present", "cached"])
 @pytest.mark.parametrize("entry", list(ENTRIES) + ["wrapper", "wrapper_cli"])
 def test_excluded_entry_refuses_before_imports_delegation_or_registration(
-    tmp_path, wrappers, platform, dependencies, entry,
+    tmp_path, wrappers, platform, legacy_android, dependencies, entry,
 ):
     path = ENTRIES.get(entry)
     if entry.startswith("wrapper"):
@@ -125,6 +127,10 @@ def test_excluded_entry_refuses_before_imports_delegation_or_registration(
         sys.addaudithook(audit)
         builtins.__import__ = spy_import
         importlib.util.find_spec = spy_find
+        if {legacy_android!r}:
+            def android_api_level():
+                raise AssertionError("platform detection must not call Android API")
+            sys.getandroidapilevel = android_api_level
         sys.platform = platform
         diagnostic = ""
         try:

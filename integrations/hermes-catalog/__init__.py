@@ -15,7 +15,9 @@ module eagerly in every process; the memory subsystem imports it only when
 import sys
 
 # File-loaded entry points cannot rely on a parent package guard.
-if sys.platform in {"android", "emscripten"}:
+if sys.platform in {"android", "emscripten"} or (
+    sys.platform == "linux" and hasattr(sys, "getandroidapilevel")
+):
     raise RuntimeError(
         f"Mnemosyne native Hermes integration is unsupported on {sys.platform}; "
         "no provider or tools were activated."
