@@ -1245,13 +1245,19 @@ def _get_connection(db_path: Path = None) -> sqlite3.Connection:
 
 
 def close_thread_connection(db_path=None, *, allow_main_thread: bool = False) -> bool:
-    """Close this thread's cached connection (see ``mnemosyne.core.memory``).
+    """Close this thread's cached connection (see ``mnemosyne.core.connection_release``).
 
     The core connection cache publishes its handle into this module's
     thread-local on every lookup, so both caches must be released together;
-    the core helper owns that logic and is imported lazily to avoid a cycle.
+    that module owns the logic and is the one place allowed to decide which
+    caches to look at.
+
+    It is imported lazily so a cold release never touches
+    ``mnemosyne.core.memory``: importing that module runs ``init_db()``, which
+    opens a default-database connection and overwrites this module's cache
+    entry before the release could select the handle the caller asked for.
     """
-    from mnemosyne.core.memory import close_thread_connection as _close
+    from mnemosyne.core.connection_release import close_thread_connection as _close
 
     return _close(db_path, allow_main_thread=allow_main_thread)
 

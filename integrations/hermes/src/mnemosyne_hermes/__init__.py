@@ -274,7 +274,13 @@ def _release_thread_connection(db_path=None) -> None:
     The core helper refuses the main thread.
     """
     try:
-        from mnemosyne.core.memory import close_thread_connection
+        # Import the side-effect-free release module, never
+        # ``mnemosyne.core.memory``: importing that module runs ``init_db()``,
+        # which opens a default-database connection and republishes it into
+        # ``beam``'s thread-local cache, displacing the handle this worker just
+        # used before cleanup can select it. Cores without the module (the
+        # released b5) fail soft here as before.
+        from mnemosyne.core.connection_release import close_thread_connection
 
         close_thread_connection(db_path)
     except Exception:  # never let cleanup break a sleep cycle

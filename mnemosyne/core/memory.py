@@ -295,70 +295,22 @@ def _get_connection(db_path = None) -> sqlite3.Connection:
 
 
 def close_thread_connection(db_path=None, *, allow_main_thread: bool = False) -> bool:
-    """Close this thread's cached SQLite connection.
+    """Close this thread's cached SQLite connection (mnemosyne#1163).
 
-    Explicit, opt-in inverse of :func:`_get_connection`. It exists for callers
-    that can *assert* no consumer will use the cached handle again: a
-    short-lived worker thread that opened the connection, finished with it, and
-    has abandoned every ``Mnemosyne``/``BeamMemory`` instance and sub-store
-    alias (``annotations``, ``canonical``, ``media``, ``episodic_graph``,
-    ``veracity_consolidator``) built on the same handle.
+    Thin re-export of
+    :func:`mnemosyne.core.connection_release.close_thread_connection`, which
+    owns the contract, the caches it covers and the close-failure policy.
 
-    "Abandoned" means no further use, not that no reference exists. A local
-    variable may still point at the instance graph after the worker's last
-    statement -- for example while a ``finally`` block runs -- provided that
-    graph is irrevocably retired. The release also assumes no open cursor,
-    statement-cache entry or deferred work will touch the handle afterwards,
-    and it covers every thread-local cache to which :func:`_get_connection`
-    publishes (this module and ``mnemosyne.core.beam``).
-
-    The library cannot verify that assertion. Connections are created with
-    ``check_same_thread=False`` and instances keep ``self.conn``, so a retained
-    instance may legitimately outlive the thread that created it. Closing on
-    thread exit, cache displacement or collection would therefore release a
-    handle a live alias may still use. Only an explicit call from the owner may
-    release it (mnemosyne#1163).
-
-    Args:
-        db_path: Database whose cached connection to close. Defaults to the
-            configured default database; a cached connection for any other
-            path is left untouched.
-        allow_main_thread: Refuse on the main thread by default, because that
-            cache is process-lifetime and shared with long-lived singletons.
-
-    Returns:
-        True if at least one cached connection was closed. False if this
-        thread held no matching connection, the call was refused, or every
-        matching close failed. A handle whose ``close()`` raised is left in its
-        cache: it is still usable, so dropping the reference here would discard
-        the caller's only retry authority. A later call may try again.
+    The logic lives in that module so the release can be reached without
+    importing this one: importing this module runs the ``init_db()`` below,
+    which opens a connection for the default database and republishes it into
+    ``beam``'s thread-local cache, displacing the handle the caller asked to
+    close. A cold worker that imported this helper therefore left its original
+    handle open.
     """
-    if threading.current_thread() is threading.main_thread() and not allow_main_thread:
-        logger.debug("close_thread_connection refused on the main thread")
-        return False
+    from mnemosyne.core.connection_release import close_thread_connection as _close
 
-    path = (Path(db_path) if db_path else _default_db_path()).expanduser().resolve()
-    wanted = str(path)
-
-    closed = False
-    # _get_connection publishes core's handle into beam's cache, so one object
-    # can be reachable from both thread-locals. Close is idempotent per handle.
-    for local in (_thread_local, beam_module._thread_local):
-        connection = getattr(local, "conn", None)
-        if connection is None or getattr(local, "db_path", None) != wanted:
-            continue
-        try:
-            connection.close()
-        except Exception:
-            # A failed close (for example a subclass raising from an overridden
-            # close) leaves the handle usable. Keeping the cache entry preserves
-            # the only retry authority; clearing it would hide a live handle.
-            logger.warning("cached connection close failed; handle retained", exc_info=True)
-            continue
-        closed = True
-        local.conn = None
-        local.db_path = None
-    return closed
+    return _close(db_path, allow_main_thread=allow_main_thread)
 
 
 def _close_dry_run_clone(

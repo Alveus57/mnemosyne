@@ -2,10 +2,13 @@
 
 import gc
 import importlib
+import json
 import os
 from pathlib import Path
 import queue
 import sqlite3
+import subprocess
+import sys
 import threading
 
 import pytest
@@ -333,3 +336,131 @@ def test_failed_close_keeps_the_handle_cached_for_retry(tmp_path):
     worker.join()
 
     assert observed.get_nowait() == (False, True, 1, True, True)
+
+
+# Runs in a fresh process: the defect this guards only appears when
+# mnemosyne.core.memory has not been imported yet on the releasing thread.
+_COLD_RELEASE_PROBE = '''
+import json
+import os
+import sys
+import threading
+from pathlib import Path
+
+root = Path(sys.argv[1])
+mode = sys.argv[2]
+entry = sys.argv[3]
+os.environ["MNEMOSYNE_DATA_DIR"] = str(root / "default")
+
+import mnemosyne.core.beam as beam_module
+from mnemosyne.core.beam import BeamMemory
+
+default_db = (root / "default" / "mnemosyne.db").resolve()
+worker_db = default_db if mode == "match" else (root / "worker" / "mnemosyne.db").resolve()
+other_db = (root / "other" / "other.db").resolve()
+
+if mode == "warm":
+    import mnemosyne.core.memory  # noqa: F401
+
+observed = {}
+other_ready = threading.Event()
+other_done = threading.Event()
+other_conn = {}
+
+
+def hold_other_path():
+    beam = BeamMemory(session_id="other", db_path=other_db)
+    other_conn["conn"] = beam.conn
+    other_ready.set()
+    other_done.wait(timeout=120)
+
+
+def release_from_worker():
+    beam = BeamMemory(session_id="cold-release", db_path=worker_db)
+    original = beam.conn
+    observed["cache_holds_original"] = (
+        getattr(beam_module._thread_local, "conn", None) is original
+    )
+    if entry == "beam_helper":
+        observed["result"] = beam_module.close_thread_connection(worker_db)
+    else:
+        import mnemosyne
+
+        observed["result"] = mnemosyne.close_thread_connection(worker_db)
+    cached = getattr(beam_module._thread_local, "conn", None)
+    observed["cache_holds_original_after"] = cached is original
+    observed["cache_cleared"] = cached is None
+    observed["replacement_leftover"] = cached is not None and cached is not original
+    try:
+        original.execute("SELECT 1").fetchone()
+        observed["original_closed"] = False
+    except Exception:
+        observed["original_closed"] = True
+    observed["memory_imported"] = "mnemosyne.core.memory" in sys.modules
+
+
+parent = BeamMemory(session_id="parent", db_path=worker_db)
+other_thread = threading.Thread(target=hold_other_path)
+other_thread.start()
+other_ready.wait(timeout=120)
+
+worker = threading.Thread(target=release_from_worker)
+worker.start()
+worker.join(timeout=120)
+
+observed["parent_usable"] = parent.conn.execute("SELECT 1").fetchone()[0] == 1
+observed["other_path_usable"] = other_conn["conn"].execute("SELECT 1").fetchone()[0] == 1
+other_done.set()
+other_thread.join(timeout=120)
+print(json.dumps(observed))
+'''
+
+
+def _run_cold_release_probe(root: Path, mode: str, entry: str) -> dict:
+    """Run the release probe in a fresh interpreter and return its observations."""
+    script = root / "cold_release_probe.py"
+    script.write_text(_COLD_RELEASE_PROBE)
+    repo_root = Path(__file__).resolve().parents[1]
+    env = dict(os.environ)
+    env["MNEMOSYNE_NO_EMBEDDINGS"] = "1"
+    env["HERMES_HOME"] = str(root / "hermes-home")
+    env["PYTHONPATH"] = os.pathsep.join(
+        [str(repo_root), env.get("PYTHONPATH", "")]
+    ).strip(os.pathsep)
+    completed = subprocess.run(
+        [sys.executable, str(script), str(root), mode, entry],
+        cwd=str(repo_root),
+        env=env,
+        capture_output=True,
+        text=True,
+        timeout=300,
+    )
+    assert completed.returncode == 0, completed.stderr
+    return json.loads(completed.stdout.strip().splitlines()[-1])
+
+
+@pytest.mark.parametrize("entry", ["beam_helper", "package_helper"])
+@pytest.mark.parametrize("mode", ["match", "differ", "warm"])
+def test_cold_release_closes_the_original_worker_handle(tmp_path, mode, entry):
+    """Cleanup must release the handle the worker opened, not a replacement.
+
+    ``mnemosyne.core.memory`` runs ``init_db()`` at import time, which opens a
+    connection for the default database and republishes it into ``beam``'s
+    thread-local cache. A release that imported that module therefore closed
+    the import's replacement and reported success (matching default path), or
+    closed nothing at all (different default path), while the worker's original
+    handle stayed open. Importing the release helper must not touch SQLite.
+    """
+    observed = _run_cold_release_probe(tmp_path, mode, entry)
+
+    assert observed["cache_holds_original"] is True
+    assert observed["result"] is True
+    assert observed["original_closed"] is True
+    assert observed["cache_holds_original_after"] is False
+    assert observed["cache_cleared"] is True
+    assert observed["replacement_leftover"] is False
+    assert observed["parent_usable"] is True
+    assert observed["other_path_usable"] is True
+    # Warm means core.memory was imported before any handle existed; cold means
+    # the release path itself must not have pulled it in.
+    assert observed["memory_imported"] is (mode == "warm")
