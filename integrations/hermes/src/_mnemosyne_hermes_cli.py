@@ -16,6 +16,13 @@ class _ReadOnlyLoader(SourceFileLoader):
 
 def main(argv: list[str] | None = None) -> int:
     """Load adjacent installer logic without importing the provider package."""
+    if sys.platform in {"android", "emscripten"}:
+        print(
+            f"Mnemosyne native Hermes integration is unsupported on {sys.platform}; "
+            "no provider or tools were activated.",
+            file=sys.stderr,
+        )
+        return 1
     module = sys.modules.get(_MODULE_NAME)
     if module is None:
         path = Path(__file__).resolve().parent / "mnemosyne_hermes" / "install.py"

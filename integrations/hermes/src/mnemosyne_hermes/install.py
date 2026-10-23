@@ -2,6 +2,15 @@
 
 from __future__ import annotations
 
+import sys
+
+# This installer can also be loaded directly by the core-free console script.
+if sys.platform in {"android", "emscripten"}:
+    raise RuntimeError(
+        f"Mnemosyne native Hermes integration is unsupported on {sys.platform}; "
+        "no provider or tools were activated."
+    )
+
 import argparse
 import base64
 import csv
@@ -20,7 +29,6 @@ import shlex
 import shutil
 import stat
 import subprocess
-import sys
 import tempfile
 from dataclasses import dataclass
 from importlib import resources
@@ -1836,6 +1844,13 @@ from pathlib import Path
 import re
 import site as site_module
 import sys
+
+# File-loaded entry points cannot rely on a parent package guard.
+if sys.platform in {"android", "emscripten"}:
+    raise RuntimeError(
+        f"Mnemosyne native Hermes integration is unsupported on {sys.platform}; "
+        "no provider or tools were activated."
+    )
 
 
 def _guard_selected_site_packages_python_compatibility(selected_site_packages: Path) -> None:

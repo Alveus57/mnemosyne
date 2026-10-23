@@ -2,6 +2,15 @@
 
 from __future__ import annotations
 
+import sys
+
+# File-loaded entry points cannot rely on a parent package guard.
+if sys.platform in {"android", "emscripten"}:
+    raise RuntimeError(
+        f"Mnemosyne native Hermes integration is unsupported on {sys.platform}; "
+        "no provider or tools were activated."
+    )
+
 import importlib.util
 from pathlib import Path
 
