@@ -14,6 +14,7 @@ import json
 import os
 import sqlite3
 import hashlib
+import sys
 from pathlib import Path
 
 import pytest
@@ -864,6 +865,7 @@ def test_backup_and_restore_roundtrip_with_fts5(tmp_path):
         target_conn.close()
 
 
+@pytest.mark.skipif(sys.platform == "win32", reason="POSIX mode-bit permissions are not supported on Windows")
 def test_backup_and_metadata_files_created_with_private_permissions(tmp_path):
     """[#640] Staged and published backup files and metadata are created with mode 0600."""
     import stat
@@ -881,6 +883,44 @@ def test_backup_and_metadata_files_created_with_private_permissions(tmp_path):
         assert stat.S_IMODE(meta_path.stat().st_mode) == 0o600
     finally:
         os.umask(orig_umask)
+
+
+def test_create_backup_format_selection_and_validation(tmp_path, monkeypatch):
+    """[#640] create_backup format validation, normalization, and environment precedence."""
+    db_path = tmp_path / "src.db"
+    bdir = tmp_path / "bk"
+    _make_simple_db(db_path)
+
+    # 1. Default format is sqlite3
+    monkeypatch.delenv("MNEMOSYNE_BACKUP_FORMAT", raising=False)
+    b_default = recovery.create_backup(db_path=db_path, backup_dir=bdir)
+    assert b_default["format"] == "sqlite3"
+    assert _gzip.decompress(Path(b_default["backup_path"]).read_bytes()).startswith(b"SQLite format 3\x00")
+
+    # 2. Whitespace-padded and mixed-case normalization
+    b_norm_sql = recovery.create_backup(db_path=db_path, backup_dir=bdir, format="  SQL  ")
+    assert b_norm_sql["format"] == "sql"
+    assert not _gzip.decompress(Path(b_norm_sql["backup_path"]).read_bytes()).startswith(b"SQLite format 3\x00")
+
+    b_norm_sqlite = recovery.create_backup(db_path=db_path, backup_dir=bdir, format=" Sqlite3 ")
+    assert b_norm_sqlite["format"] == "sqlite3"
+
+    # 3. Environment variable MNEMOSYNE_BACKUP_FORMAT
+    monkeypatch.setenv("MNEMOSYNE_BACKUP_FORMAT", "sql")
+    b_env_sql = recovery.create_backup(db_path=db_path, backup_dir=bdir)
+    assert b_env_sql["format"] == "sql"
+
+    # 4. Explicit format overrides environment variable
+    b_override = recovery.create_backup(db_path=db_path, backup_dir=bdir, format="sqlite3")
+    assert b_override["format"] == "sqlite3"
+
+    # 5. Invalid format fails closed (raises ValueError)
+    with pytest.raises(ValueError, match="Invalid backup format: 'sql3'"):
+        recovery.create_backup(db_path=db_path, backup_dir=bdir, format="sql3")
+
+    monkeypatch.setenv("MNEMOSYNE_BACKUP_FORMAT", "invalid_fmt")
+    with pytest.raises(ValueError, match="Invalid backup format: 'invalid_fmt'"):
+        recovery.create_backup(db_path=db_path, backup_dir=bdir)
 
 
 def test_restore_backup_accepts_valid_legacy_sql_dump(tmp_path):

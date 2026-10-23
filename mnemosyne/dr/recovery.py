@@ -195,13 +195,15 @@ def create_backup(db_path: Optional[Path] = None, backup_dir: Optional[Path] = N
 
     backup_dir.mkdir(parents=True, exist_ok=True)
 
-    target_format = (
-        format
-        or os.environ.get("MNEMOSYNE_BACKUP_FORMAT")
-        or "sqlite3"
-    ).lower()
-    if target_format not in ("sqlite3", "sql"):
+    raw_format = format if format is not None else os.environ.get("MNEMOSYNE_BACKUP_FORMAT")
+    if raw_format is None:
         target_format = "sqlite3"
+    else:
+        target_format = raw_format.strip().lower()
+        if target_format not in ("sqlite3", "sql"):
+            raise ValueError(
+                f"Invalid backup format: {raw_format!r}. Expected 'sqlite3' or 'sql'."
+            )
 
     now = datetime.now()
     timestamp = now.strftime("%Y%m%d_%H%M%S")
