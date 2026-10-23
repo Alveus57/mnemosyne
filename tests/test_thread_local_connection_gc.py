@@ -345,21 +345,23 @@ import json
 import os
 import sys
 import threading
+import traceback
 from pathlib import Path
 
 root = Path(sys.argv[1])
-mode = sys.argv[2]
-entry = sys.argv[3]
+import_mode = sys.argv[2]
+path_mode = sys.argv[3]
+entry = sys.argv[4]
 os.environ["MNEMOSYNE_DATA_DIR"] = str(root / "default")
 
 import mnemosyne.core.beam as beam_module
 from mnemosyne.core.beam import BeamMemory
 
 default_db = (root / "default" / "mnemosyne.db").resolve()
-worker_db = default_db if mode == "match" else (root / "worker" / "mnemosyne.db").resolve()
+worker_db = default_db if path_mode == "match" else (root / "worker" / "mnemosyne.db").resolve()
 other_db = (root / "other" / "other.db").resolve()
 
-if mode == "warm":
+if import_mode == "warm":
     import mnemosyne.core.memory  # noqa: F401
 
 observed = {}
@@ -375,7 +377,7 @@ def hold_other_path():
     other_done.wait(timeout=120)
 
 
-def release_from_worker():
+def _release_in_worker():
     beam = BeamMemory(session_id="cold-release", db_path=worker_db)
     original = beam.conn
     observed["cache_holds_original"] = (
@@ -399,14 +401,25 @@ def release_from_worker():
     observed["memory_imported"] = "mnemosyne.core.memory" in sys.modules
 
 
+def release_from_worker():
+    # Surface a thread failure as a probe failure instead of a silent exit 0.
+    try:
+        _release_in_worker()
+    except BaseException:
+        observed["error"] = traceback.format_exc()
+
+
 parent = BeamMemory(session_id="parent", db_path=worker_db)
 other_thread = threading.Thread(target=hold_other_path)
 other_thread.start()
-other_ready.wait(timeout=120)
+assert other_ready.wait(timeout=120), "other-path holder did not start"
 
 worker = threading.Thread(target=release_from_worker)
 worker.start()
 worker.join(timeout=120)
+assert not worker.is_alive(), "release worker did not finish"
+assert "error" not in observed, observed.get("error")
+assert "memory_imported" in observed, "release worker failed before recording observations"
 
 observed["parent_usable"] = parent.conn.execute("SELECT 1").fetchone()[0] == 1
 observed["other_path_usable"] = other_conn["conn"].execute("SELECT 1").fetchone()[0] == 1
@@ -416,7 +429,7 @@ print(json.dumps(observed))
 '''
 
 
-def _run_cold_release_probe(root: Path, mode: str, entry: str) -> dict:
+def _run_cold_release_probe(root: Path, import_mode: str, path_mode: str, entry: str) -> dict:
     """Run the release probe in a fresh interpreter and return its observations."""
     script = root / "cold_release_probe.py"
     script.write_text(_COLD_RELEASE_PROBE)
@@ -428,7 +441,7 @@ def _run_cold_release_probe(root: Path, mode: str, entry: str) -> dict:
         [str(repo_root), env.get("PYTHONPATH", "")]
     ).strip(os.pathsep)
     completed = subprocess.run(
-        [sys.executable, str(script), str(root), mode, entry],
+        [sys.executable, str(script), str(root), import_mode, path_mode, entry],
         cwd=str(repo_root),
         env=env,
         capture_output=True,
@@ -440,8 +453,9 @@ def _run_cold_release_probe(root: Path, mode: str, entry: str) -> dict:
 
 
 @pytest.mark.parametrize("entry", ["beam_helper", "package_helper"])
-@pytest.mark.parametrize("mode", ["match", "differ", "warm"])
-def test_cold_release_closes_the_original_worker_handle(tmp_path, mode, entry):
+@pytest.mark.parametrize("path_mode", ["match", "differ"])
+@pytest.mark.parametrize("import_mode", ["cold", "warm"])
+def test_cold_release_closes_the_original_worker_handle(tmp_path, import_mode, path_mode, entry):
     """Cleanup must release the handle the worker opened, not a replacement.
 
     ``mnemosyne.core.memory`` runs ``init_db()`` at import time, which opens a
@@ -450,8 +464,12 @@ def test_cold_release_closes_the_original_worker_handle(tmp_path, mode, entry):
     the import's replacement and reported success (matching default path), or
     closed nothing at all (different default path), while the worker's original
     handle stayed open. Importing the release helper must not touch SQLite.
+
+    ``import_mode`` covers the cold process (the failing case) and the warm one
+    where an unrelated caller imported ``core.memory`` first; ``path_mode``
+    covers a worker database on the default path and elsewhere.
     """
-    observed = _run_cold_release_probe(tmp_path, mode, entry)
+    observed = _run_cold_release_probe(tmp_path, import_mode, path_mode, entry)
 
     assert observed["cache_holds_original"] is True
     assert observed["result"] is True
@@ -463,4 +481,4 @@ def test_cold_release_closes_the_original_worker_handle(tmp_path, mode, entry):
     assert observed["other_path_usable"] is True
     # Warm means core.memory was imported before any handle existed; cold means
     # the release path itself must not have pulled it in.
-    assert observed["memory_imported"] is (mode == "warm")
+    assert observed["memory_imported"] is (import_mode == "warm")

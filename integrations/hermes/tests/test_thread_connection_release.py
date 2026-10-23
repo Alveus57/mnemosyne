@@ -28,6 +28,7 @@ root = Path(sys.argv[1])
 method = sys.argv[2]
 repo = Path(sys.argv[3])
 path_mode = sys.argv[4]
+sleep_mode = sys.argv[5]
 
 sys.path.insert(0, str(repo / "integrations" / "hermes" / "src"))
 sys.path.insert(0, str(repo))
@@ -49,6 +50,14 @@ class RecordingBeam(BeamMemory):
     def __init__(self, *args, **kwargs):
         super().__init__(*args, **kwargs)
         created["conn"] = self.conn
+
+    def sleep(self, *args, **kwargs):
+        # The release sits in ``finally`` precisely so a failing sleep still
+        # releases; ``raises`` proves cleanup does not depend on success.
+        observed["sleep_raised"] = sleep_mode == "raises"
+        if sleep_mode == "raises":
+            raise RuntimeError("injected sleep failure")
+        return super().sleep(*args, **kwargs)
 
 
 provider_module._get_beam_class = lambda: RecordingBeam
@@ -89,13 +98,14 @@ if method == "auto_sleep":
 else:
     provider.on_session_end([])
 
+assert "closed_at_release" in observed, "worker finished without releasing its handle"
 observed["parent_usable"] = parent.conn.execute("SELECT 1").fetchone()[0] == 1
-observed["worker_ran"] = "closed_at_release" in observed
+observed["worker_ran"] = True
 print(json.dumps(observed))
 '''
 
 
-def _run_worker_probe(root: Path, method: str, path_mode: str) -> dict:
+def _run_worker_probe(root: Path, method: str, path_mode: str, sleep_mode: str) -> dict:
     """Drive one packaged worker method in a fresh interpreter."""
     script = root / "worker_release_probe.py"
     script.write_text(_WORKER_RELEASE_PROBE)
@@ -103,7 +113,7 @@ def _run_worker_probe(root: Path, method: str, path_mode: str) -> dict:
     env["MNEMOSYNE_NO_EMBEDDINGS"] = "1"
     env["HERMES_HOME"] = str(root / "hermes-home")
     completed = subprocess.run(
-        [sys.executable, str(script), str(root), method, str(_REPO_ROOT), path_mode],
+        [sys.executable, str(script), str(root), method, str(_REPO_ROOT), path_mode, sleep_mode],
         cwd=str(_REPO_ROOT),
         env=env,
         capture_output=True,
@@ -114,23 +124,28 @@ def _run_worker_probe(root: Path, method: str, path_mode: str) -> dict:
     return json.loads(completed.stdout.strip().splitlines()[-1])
 
 
+@pytest.mark.parametrize("sleep_mode", ["noop", "raises"])
 @pytest.mark.parametrize("path_mode", ["match", "differ"])
 @pytest.mark.parametrize("method", ["auto_sleep", "session_end"])
-def test_packaged_sleep_worker_releases_the_handle_it_opened(tmp_path, method, path_mode):
+def test_packaged_sleep_worker_releases_the_handle_it_opened(
+    tmp_path, method, path_mode, sleep_mode
+):
     """Cleanup releases the worker's own handle without importing core.memory.
 
     A cold process (profile isolation off) is the failing case: the import that
     used to happen inside cleanup displaced the handle first, so the release
     either closed the import's replacement and reported success or closed
     nothing while the worker's handle stayed open. ``match`` keeps the worker's
-    database on the default path, ``differ`` moves it elsewhere.
+    database on the default path, ``differ`` moves it elsewhere, and ``raises``
+    makes ``sleep()`` fail so the ``finally`` placement is exercised too.
     """
-    observed = _run_worker_probe(tmp_path, method, path_mode)
+    observed = _run_worker_probe(tmp_path, method, path_mode, sleep_mode)
 
     assert observed["worker_ran"] is True
     assert observed["release_db_path"].endswith(
         "default/mnemosyne.db" if path_mode == "match" else "worker/mnemosyne.db"
     )
+    assert observed.get("sleep_raised") is (sleep_mode == "raises")
     assert observed["closed_at_release"] is True
     assert observed["memory_imported"] is False
     assert observed["parent_usable"] is True
