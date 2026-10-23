@@ -85,6 +85,14 @@ def test_create_backup_succeeds_with_sqlite_vec_tables(tmp_path):
     )
     conn.execute("CREATE TABLE meta (k TEXT PRIMARY KEY, v TEXT)")
     conn.executemany("INSERT INTO meta VALUES (?, ?)", [("a", "1"), ("b", "2")])
+    conn.execute(
+        "INSERT INTO vec_items (rowid, embedding) VALUES (?, ?)",
+        (1, json.dumps([1.0, 0.0, 0.0, 0.0])),
+    )
+    conn.execute(
+        "INSERT INTO vec_items (rowid, embedding) VALUES (?, ?)",
+        (2, json.dumps([0.0, 1.0, 0.0, 0.0])),
+    )
     conn.commit()
     conn.close()
 
@@ -109,17 +117,27 @@ def test_create_backup_succeeds_with_sqlite_vec_tables(tmp_path):
     assert res["integrity_check"] is True
 
     target_conn = sqlite3.connect(str(target))
-    _load_sqlite_vec_extension = False
     try:
         target_conn.enable_load_extension(True)
         sqlite_vec.load(target_conn)
-        _load_sqlite_vec_extension = True
-    except Exception:
-        pass
-    if _load_sqlite_vec_extension:
+        target_conn.enable_load_extension(False)
+
+        master_rows = target_conn.execute(
+            "SELECT name FROM sqlite_master WHERE type='table' AND name='vec_items'"
+        ).fetchall()
+        assert len(master_rows) == 1
+
         rows = target_conn.execute("SELECT k, v FROM meta ORDER BY k").fetchall()
         assert rows == [("a", "1"), ("b", "2")]
-    target_conn.close()
+
+        knn = target_conn.execute(
+            "SELECT rowid, distance FROM vec_items WHERE embedding MATCH ? AND k = 1",
+            (json.dumps([0.9, 0.1, 0.0, 0.0]),),
+        ).fetchall()
+        assert len(knn) == 1
+        assert knn[0][0] == 1
+    finally:
+        target_conn.close()
 
 
 # ---------------------------------------------------------------------------
@@ -806,35 +824,19 @@ def test_restore_backup_rejects_load_extension_in_dump(tmp_path, monkeypatch):
     )
 
 
-def test_backup_and_restore_roundtrip_with_fts5_and_vec(tmp_path):
-    """[#640] Database with FTS5 and vec0 virtual tables backs up and restores successfully."""
-    db_path = tmp_path / "fts_vec_source.db"
+def test_backup_and_restore_roundtrip_with_fts5(tmp_path):
+    """[#640] Database with FTS5 virtual tables backs up and restores successfully."""
+    db_path = tmp_path / "fts_source.db"
     backup_dir = tmp_path / "backups"
-    restore_target = tmp_path / "fts_vec_restored.db"
+    restore_target = tmp_path / "fts_restored.db"
 
     conn = sqlite3.connect(str(db_path))
     conn.execute("CREATE TABLE items (id INTEGER PRIMARY KEY, title TEXT)")
     conn.execute("CREATE VIRTUAL TABLE items_fts USING fts5(title)")
     conn.execute("INSERT INTO items (id, title) VALUES (1, 'FTS5 virtual table backup test')")
     conn.execute("INSERT INTO items_fts (rowid, title) VALUES (1, 'FTS5 virtual table backup test')")
-
-    # If sqlite_vec is present, also add a vec0 virtual table
-    try:
-        conn.enable_load_extension(True)
-        import importlib
-        sqlite_vec_mod = importlib.import_module("sqlite_vec")
-        sqlite_vec_mod.load(conn)
-        conn.execute("CREATE VIRTUAL TABLE items_vec USING vec0(embedding float[2])")
-        conn.execute("INSERT INTO items_vec (rowid, embedding) VALUES (1, '[0.1, 0.2]')")
-    except Exception:
-        pass
-    finally:
-        try:
-            conn.enable_load_extension(False)
-        except Exception:
-            pass
-        conn.commit()
-        conn.close()
+    conn.commit()
+    conn.close()
 
     # 1. create_backup produces a binary SQLite backup
     backup = recovery.create_backup(db_path=db_path, backup_dir=backup_dir)
@@ -849,13 +851,61 @@ def test_backup_and_restore_roundtrip_with_fts5_and_vec(tmp_path):
     assert result["restored"] is True
     assert result["integrity_check"] is True
 
-    # 3. Assert restored DB integrity and data retrievability
+    # 3. Assert restored DB integrity, table counts, and FTS retrievability
     assert recovery.verify_integrity(restore_target) is True
     target_conn = sqlite3.connect(str(restore_target))
     try:
+        items_count = target_conn.execute("SELECT COUNT(*) FROM items").fetchone()[0]
+        assert items_count == 1
         match_rows = target_conn.execute("SELECT rowid, title FROM items_fts WHERE items_fts MATCH 'backup'").fetchall()
         assert len(match_rows) == 1
         assert match_rows[0][0] == 1
+    finally:
+        target_conn.close()
+
+
+def test_backup_and_metadata_files_created_with_private_permissions(tmp_path):
+    """[#640] Staged and published backup files and metadata are created with mode 0600."""
+    import stat
+
+    orig_umask = os.umask(0o022)
+    try:
+        db_path = tmp_path / "perm_test.db"
+        bdir = tmp_path / "bk"
+        _make_simple_db(db_path)
+        backup = recovery.create_backup(db_path=db_path, backup_dir=bdir)
+        backup_path = Path(backup["backup_path"])
+        meta_path = Path(backup["metadata_path"])
+
+        assert stat.S_IMODE(backup_path.stat().st_mode) == 0o600
+        assert stat.S_IMODE(meta_path.stat().st_mode) == 0o600
+    finally:
+        os.umask(orig_umask)
+
+
+def test_restore_backup_accepts_valid_legacy_sql_dump(tmp_path):
+    """[#640] restore_backup() seamlessly restores valid legacy text SQL dumps."""
+    db_path = tmp_path / "src.db"
+    bdir = tmp_path / "bk"
+    _make_simple_db(db_path)
+
+    backup = recovery.create_backup(db_path=db_path, backup_dir=bdir, format="sql")
+    backup_path = Path(backup["backup_path"])
+    assert backup["format"] == "sql"
+
+    decompressed = _gzip.decompress(backup_path.read_bytes())
+    assert not decompressed.startswith(b"SQLite format 3\x00")
+    assert b"CREATE TABLE" in decompressed
+
+    target = tmp_path / "legacy_restored.db"
+    res = recovery.restore_backup(backup_path, target)
+    assert res["restored"] is True
+    assert res["integrity_check"] is True
+
+    target_conn = sqlite3.connect(str(target))
+    try:
+        rows = target_conn.execute("SELECT id, v FROM t ORDER BY id").fetchall()
+        assert rows == [(1, "a"), (2, "b")]
     finally:
         target_conn.close()
 
