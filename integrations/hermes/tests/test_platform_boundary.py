@@ -53,13 +53,14 @@ def wrappers(tmp_path):
     return wrapper
 
 
-@pytest.mark.parametrize("platform, legacy_android", [
-    ("android", False), ("emscripten", False), ("linux", True),
+@pytest.mark.parametrize("platform, legacy_android, platform_label", [
+    ("android", False, "android"), ("emscripten", False, "emscripten"),
+    ("linux", True, "android"),
 ], ids=["android", "emscripten", "legacy_android"])
 @pytest.mark.parametrize("dependencies", ["absent", "present", "cached"])
 @pytest.mark.parametrize("entry", list(ENTRIES) + ["wrapper", "wrapper_cli"])
 def test_excluded_entry_refuses_before_imports_delegation_or_registration(
-    tmp_path, wrappers, platform, legacy_android, dependencies, entry,
+    tmp_path, wrappers, platform, legacy_android, platform_label, dependencies, entry,
 ):
     path = ENTRIES.get(entry)
     if entry.startswith("wrapper"):
@@ -176,12 +177,16 @@ def test_excluded_entry_refuses_before_imports_delegation_or_registration(
         assert not attempted, attempted
         assert not registrations, registrations
         assert not effects, effects
-        assert diagnostic == "console" or ("unsupported" in diagnostic.lower() and platform in diagnostic), diagnostic
+        expected = "Mnemosyne native Hermes integration is unsupported on {platform_label}; no provider or tools were activated."
+        assert diagnostic == "console" or diagnostic == expected, diagnostic
     '''
     result = _run(code, tmp_path)
     assert result.returncode == 0, result.stdout + result.stderr
     if entry.startswith("console"):
-        assert "unsupported" in result.stderr.lower() and platform in result.stderr
+        assert result.stderr == (
+            f"Mnemosyne native Hermes integration is unsupported on {platform_label}; "
+            "no provider or tools were activated.\n"
+        )
     assert config.read_bytes() == before
     assert not (tmp_path / "data").exists()
 

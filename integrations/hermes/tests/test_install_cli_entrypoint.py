@@ -157,7 +157,10 @@ else:
                             cwd=tmp_path, capture_output=True, text=True, timeout=60)
     assert result.returncode == 0, result.stdout + result.stderr
     if legacy_android:
-        assert "unsupported" in result.stderr.lower()
+        assert result.stderr == (
+            "Mnemosyne native Hermes integration is unsupported on android; "
+            "no provider or tools were activated.\n"
+        )
     else:
         assert result.stderr == ""
 

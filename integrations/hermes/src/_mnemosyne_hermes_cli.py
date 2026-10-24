@@ -19,8 +19,9 @@ def main(argv: list[str] | None = None) -> int:
     if sys.platform in {"android", "emscripten"} or (
         sys.platform == "linux" and hasattr(sys, "getandroidapilevel")
     ):
+        _platform_label = "android" if sys.platform == "linux" else sys.platform
         print(
-            f"Mnemosyne native Hermes integration is unsupported on {sys.platform}; "
+            f"Mnemosyne native Hermes integration is unsupported on {_platform_label}; "
             "no provider or tools were activated.",
             file=sys.stderr,
         )
