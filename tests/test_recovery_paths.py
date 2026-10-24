@@ -950,6 +950,68 @@ def test_restore_backup_accepts_valid_legacy_sql_dump(tmp_path):
         target_conn.close()
 
 
+def test_backup_and_restore_captures_committed_wal_frames(tmp_path):
+    """[#640] create_backup() captures committed WAL frames and restore delivers them."""
+    src = tmp_path / "wal_src.db"
+    bdir = tmp_path / "bk"
+    target = tmp_path / "wal_restored.db"
+
+    conn = sqlite3.connect(str(src))
+    conn.execute("PRAGMA journal_mode=WAL")
+    conn.execute("CREATE TABLE wal_items (id INTEGER PRIMARY KEY, note TEXT)")
+    conn.execute("INSERT INTO wal_items VALUES (1, 'initial')")
+    conn.commit()
+    conn.execute("INSERT INTO wal_items VALUES (2, 'committed_wal_frame')")
+    conn.commit()
+
+    wal_file = src.with_name(src.name + "-wal")
+    assert wal_file.exists()
+    assert wal_file.stat().st_size > 0
+
+    backup = recovery.create_backup(db_path=src, backup_dir=bdir)
+    res = recovery.restore_backup(Path(backup["backup_path"]), target)
+    assert res["restored"] is True
+    assert res["integrity_check"] is True
+
+    target_conn = sqlite3.connect(str(target))
+    try:
+        rows = target_conn.execute("SELECT id, note FROM wal_items ORDER BY id").fetchall()
+        assert rows == [(1, "initial"), (2, "committed_wal_frame")]
+    finally:
+        target_conn.close()
+        conn.close()
+
+
+def test_restore_backup_rejects_corrupt_binary_payload_and_cleans_stage(tmp_path):
+    """[#640] Corrupted binary payload fails restore, preserves target byte-identically, and cleans staged files."""
+    target = tmp_path / "target.db"
+    _make_simple_db(target)
+    initial_target_bytes = target.read_bytes()
+
+    src = tmp_path / "src.db"
+    bdir = tmp_path / "bk"
+    _make_simple_db(src)
+
+    backup = recovery.create_backup(db_path=src, backup_dir=bdir)
+    backup_path = Path(backup["backup_path"])
+    meta_path = Path(backup["metadata_path"])
+
+    corrupt_dump = b"SQLite format 3\x00" + b"\xff" * 4096
+    compressed_corrupt = _gzip.compress(corrupt_dump)
+    backup_path.write_bytes(compressed_corrupt)
+
+    meta = json.loads(meta_path.read_text())
+    meta["backup_checksum"] = hashlib.sha256(compressed_corrupt).hexdigest()[:16]
+    meta["dump_checksum"] = hashlib.sha256(corrupt_dump).hexdigest()
+    meta_path.write_text(json.dumps(meta, indent=2))
+
+    with pytest.raises((RuntimeError, sqlite3.DatabaseError)):
+        recovery.restore_backup(backup_path, target)
+
+    assert target.read_bytes() == initial_target_bytes
+    assert list(target.parent.glob("*restore_staged*")) == []
+
+
 # ---------------------------------------------------------------------------
 # Task 9: re-acquire the writer lock on the replacement inode after
 # os.replace(). A BEGIN IMMEDIATE lock binds to the inode opened at connect
