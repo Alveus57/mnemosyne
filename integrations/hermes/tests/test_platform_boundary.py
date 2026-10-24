@@ -191,6 +191,54 @@ def test_excluded_entry_refuses_before_imports_delegation_or_registration(
     assert not (tmp_path / "data").exists()
 
 
+@pytest.mark.parametrize("entry", ["__init__.py", "cli.py"])
+@pytest.mark.parametrize("platform, legacy_android, platform_label", [
+    ("android", False, "android"), ("emscripten", False, "emscripten"),
+    ("linux", True, "android"), ("linux", False, None),
+], ids=["android", "emscripten", "legacy_android", "desktop_linux"])
+def test_wrapper_refuses_excluded_platform_before_bootstrap_execution(
+    tmp_path, wrappers, entry, platform, legacy_android, platform_label,
+):
+    """Catch bootstrap loading before refusal, retaining the desktop loading path."""
+    marker = tmp_path / "bootstrap-executed"
+    (wrappers / "_mnemosyne_bootstrap.py").write_text(
+        f"from pathlib import Path\nPath({str(marker)!r}).touch()\n"
+        "raise AssertionError('bootstrap execution sentinel')\n"
+    )
+    code = f'''
+        import importlib.util, sys
+        if hasattr(sys, "getandroidapilevel"):
+            del sys.getandroidapilevel
+        if {legacy_android!r}:
+            def android_api_level():
+                raise AssertionError("platform detection must not call Android API")
+            sys.getandroidapilevel = android_api_level
+        sys.platform = {platform!r}
+        spec = importlib.util.spec_from_file_location(
+            "wrapper_probe", {str(wrappers / entry)!r}
+        )
+        module = importlib.util.module_from_spec(spec)
+        sys.modules[spec.name] = module
+        platform_label = {platform_label!r}
+        try:
+            spec.loader.exec_module(module)
+        except RuntimeError as exc:
+            assert platform_label is not None
+            assert str(exc) == (
+                "Mnemosyne native Hermes integration is unsupported on {platform_label}; "
+                "no provider or tools were activated."
+            ), str(exc)
+        except AssertionError as exc:
+            assert platform_label is None, str(exc)
+            assert str(exc) == "bootstrap execution sentinel", str(exc)
+        else:
+            raise AssertionError("wrapper did not reach refusal or bootstrap")
+    '''
+    result = _run(code, tmp_path)
+    assert result.returncode == 0, result.stdout + result.stderr
+    assert marker.exists() == (platform_label is None)
+
+
 @pytest.mark.parametrize("entry", ["package", "catalog"])
 def test_desktop_registers_provider_cli_and_tools_without_rewriting_config(tmp_path, entry):
     config = tmp_path / "config.yaml"

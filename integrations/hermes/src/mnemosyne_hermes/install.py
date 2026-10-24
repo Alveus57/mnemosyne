@@ -1970,6 +1970,17 @@ def activate() -> dict[str, object]:
     return manifest
 """.replace("__MNEMOSYNE_WRAPPER_MANIFEST_NAME__", repr(WRAPPER_MANIFEST_NAME))
     init_source = """\"\"\"Persistent Mnemosyne Hermes plugin wrapper.\"\"\"
+import sys
+
+if sys.platform in {"android", "emscripten"} or (
+    sys.platform == "linux" and hasattr(sys, "getandroidapilevel")
+):
+    _platform_label = "android" if sys.platform == "linux" else sys.platform
+    raise RuntimeError(
+        f"Mnemosyne native Hermes integration is unsupported on {_platform_label}; "
+        "no provider or tools were activated."
+    )
+
 from ._mnemosyne_bootstrap import activate as _activate
 
 _activate()
@@ -1978,6 +1989,17 @@ _activate()
 from mnemosyne_hermes import *  # noqa: F401,F403,E402
 """
     cli_source = """\"\"\"Hermes CLI wrapper for the selected Mnemosyne package.\"\"\"
+import sys
+
+if sys.platform in {"android", "emscripten"} or (
+    sys.platform == "linux" and hasattr(sys, "getandroidapilevel")
+):
+    _platform_label = "android" if sys.platform == "linux" else sys.platform
+    raise RuntimeError(
+        f"Mnemosyne native Hermes integration is unsupported on {_platform_label}; "
+        "no provider or tools were activated."
+    )
+
 import importlib.util
 from pathlib import Path
 
