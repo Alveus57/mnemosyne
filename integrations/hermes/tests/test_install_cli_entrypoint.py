@@ -119,9 +119,17 @@ def wheel_consumer(tmp_path_factory):
     return python
 
 
-@pytest.mark.parametrize("legacy_android", [True, False], ids=["legacy_android", "ordinary_linux"])
+@pytest.mark.parametrize(
+    ("platform", "legacy_android"),
+    [
+        pytest.param("android", False, id="android"),
+        pytest.param("emscripten", False, id="emscripten"),
+        pytest.param("linux", True, id="legacy_android"),
+        pytest.param("linux", False, id="ordinary_linux"),
+    ],
+)
 def test_installed_wheel_console_checks_android_before_cached_installer(
-    tmp_path, wheel_consumer, legacy_android,
+    tmp_path, wheel_consumer, platform, legacy_android,
 ):
     code = f'''
 import importlib.metadata, importlib.util, pathlib, sys, types
@@ -138,7 +146,7 @@ def cached_main(argv):
     return 0
 cached.main = cached_main
 sys.modules[cached.__name__] = cached
-sys.platform = "linux"
+sys.platform = {platform!r}
 if {legacy_android!r}:
     def android_api_level():
         raise AssertionError("platform detection must not call Android API")
@@ -146,7 +154,7 @@ if {legacy_android!r}:
 else:
     assert not hasattr(sys, "getandroidapilevel")
 status = main(["install"])
-if {legacy_android!r}:
+if {legacy_android!r} or {platform!r} in ("android", "emscripten"):
     assert status != 0, status
     assert calls == [], calls
 else:
@@ -156,9 +164,10 @@ else:
     result = subprocess.run([str(wheel_consumer), "-I", "-B", "-c", code],
                             cwd=tmp_path, capture_output=True, text=True, timeout=60)
     assert result.returncode == 0, result.stdout + result.stderr
-    if legacy_android:
+    if legacy_android or platform in ("android", "emscripten"):
+        expected_platform = "android" if legacy_android else platform
         assert result.stderr == (
-            "Mnemosyne native Hermes integration is unsupported on android; "
+            f"Mnemosyne native Hermes integration is unsupported on {expected_platform}; "
             "no provider or tools were activated.\n"
         )
     else:
