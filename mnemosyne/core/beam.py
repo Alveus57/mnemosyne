@@ -1244,6 +1244,24 @@ def _get_connection(db_path: Path = None) -> sqlite3.Connection:
     return _thread_local.conn
 
 
+def close_thread_connection(db_path=None, *, allow_main_thread: bool = False) -> bool:
+    """Close this thread's cached connection (see ``mnemosyne.core.connection_release``).
+
+    The core connection cache publishes its handle into this module's
+    thread-local on every lookup, so both caches must be released together;
+    that module owns the logic and is the one place allowed to decide which
+    caches to look at.
+
+    It is imported lazily so a cold release never touches
+    ``mnemosyne.core.memory``: importing that module runs ``init_db()``, which
+    opens a default-database connection and overwrites this module's cache
+    entry before the release could select the handle the caller asked for.
+    """
+    from mnemosyne.core.connection_release import close_thread_connection as _close
+
+    return _close(db_path, allow_main_thread=allow_main_thread)
+
+
 def _detect_vec_type(conn: sqlite3.Connection) -> str:
     """
     Detect whether sqlite-vec supports int8/bit.
@@ -5095,9 +5113,12 @@ _KO_JOSA = (
 )
 
 
+_HANGUL_SYLLABLE_RE = re.compile("[\uac00-\ud7a3]")
+
+
 def _has_hangul(text: str) -> bool:
     """True if text contains at least one precomposed Hangul syllable."""
-    return any("가" <= ch <= "힣" for ch in text)
+    return _HANGUL_SYLLABLE_RE.search(text) is not None
 
 
 _KO_JOSA_LONGEST_FIRST = tuple(sorted(_KO_JOSA, key=len, reverse=True))
