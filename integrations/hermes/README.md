@@ -102,6 +102,15 @@ transaction or protection against adversarial filesystem races. No runtime,
 hook, autosave, update or release acceptance is implied. This enhancement is
 separate from publication of the already merged #1217 fix.
 
+## Native integration platform support
+
+Android and Emscripten are excluded from the native Hermes integration. Source
+entry points fail closed before provider/core imports or runtime activation;
+static discovery is not an availability guarantee. See [platform boundaries and
+release gates](PLATFORM_SUPPORT.md). A guard-bearing standalone release and a
+catalog floor requiring that actually published version remain shipping gates;
+this source change does not retrofit published `0.7.6` or existing wrappers.
+
 ## How It Works
 
 Mnemosyne runs on three stages:
@@ -166,6 +175,17 @@ Provider lifecycle hooks are fail-soft. Database or disk failures during
 prefetch, turn sync, session-end or automatic consolidation, and wrapper or
 audit cleanup are logged and suppressed so Hermes can continue without a
 lifecycle exception surfacing to the user.
+
+The auto-sleep and session-end workers open their own `BeamMemory` on a
+short-lived thread and release that thread's cached SQLite handle in `finally`,
+so cleanup also runs when the sleep pass fails. The release goes through
+`mnemosyne.core.connection_release.close_thread_connection`: it never imports
+`mnemosyne.core.memory` (whose import-time `init_db()` would open a default
+connection and displace the worker's handle), it is fail-soft like the rest of
+the lifecycle, and a handle whose `close()` raised stays cached so a later call
+can retry. The module ships with the core source tree for now. Against a
+released core that predates it, cleanup skips through the same fail-soft path;
+the `mnemosyne-memory` minimum moves once that core is published.
 
 ---
 
