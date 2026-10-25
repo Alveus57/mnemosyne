@@ -8,6 +8,7 @@ and this project adheres to [SemVer](https://semver.org/) starting from v3.1.2.
 ## [Unreleased]
 
 ### Fixed
+- **Remote consolidation summaries retain Markdown bullet facts (#1241).** OpenAI-compatible summarizer output keeps `-` and `*` list items while still removing prompt/token echoes and rejecting malformed reasoning. Local GGUF cleanup, including host-to-local fallback, is unchanged. Remote fact extraction remains separate work (#1158).
 - **Native Hermes integration fails closed on Android/Emscripten (#1230).** Both catalog dependency edges exclude those platforms, and catalog/package/early-CLI/legacy entry paths refuse activation before runtime imports or registration, even with dependencies present. Desktop behavior and existing floors/caps are unchanged. A maintainer-published guard-bearing standalone release, a catalog floor requiring that actual release, and native acceptance remain shipping gates; source repair alone does not deliver them.
 - Generated Hermes wrappers emit a WARNING with the existing Python compatibility diagnostic before rejecting a mismatched selected environment (#635). The exception and pre-activation guard are unchanged; gateway log routing is not covered.
 - **CLI `recall` and `search` reject missing explicitly selected named banks (#1236).** Validate `MNEMOSYNE_BANK` before memory initialization, reporting a missing bank or database instead of creating an empty store. Default bootstrap and write-command bank creation are unchanged.
