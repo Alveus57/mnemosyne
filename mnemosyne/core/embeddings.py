@@ -62,7 +62,7 @@ _FASTEMBED_AVAILABLE = _is_fastembed_available()
 def _cfg(key, default=None):
     """Read one config value with the documented config > env > default order."""
     try:
-        from mnemosyne.core.config import get as _config_get
+        from mnemosyne.core.config import peek as _config_get
         return _config_get(key, default)
     except Exception:
         return default
@@ -70,7 +70,7 @@ def _cfg(key, default=None):
 
 def _cfg_bool(key, default=False):
     try:
-        from mnemosyne.core.config import get_bool as _config_get_bool
+        from mnemosyne.core.config import peek_bool as _config_get_bool
         return _config_get_bool(key, default)
     except Exception:
         return default

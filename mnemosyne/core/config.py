@@ -819,6 +819,43 @@ def get(key: str, default: Any = None) -> Any:
     return get_config().get(key, default)
 
 
+def peek(key: str, default: Any = None) -> Any:
+    """Read one config value without creating or seeding config.yaml.
+
+    Same ``config.yaml > env > default`` precedence as :func:`get`, but a
+    missing file is treated as empty instead of being auto-seeded. Read-only
+    callers (module import paths, doctor, diagnostics) must use this: the
+    seeding side effect of :func:`get` creates a data-tree file, which turns
+    a read into a write.
+    """
+    path = _default_config_path()
+    if path.exists():
+        import yaml
+
+        try:
+            data = yaml.safe_load(path.read_text(encoding="utf-8")) or {}
+        except Exception:
+            data = {}
+        if isinstance(data, dict) and key in data:
+            return data[key]
+    env_var = ENV_VAR_MAP.get(key)
+    if env_var:
+        val = os.environ.get(env_var)
+        if val is not None:
+            return val
+    return default
+
+
+def peek_bool(key: str, default: bool = False) -> bool:
+    """Boolean variant of :func:`peek`; never seeds config.yaml."""
+    val = peek(key)
+    if val is None:
+        return default
+    if isinstance(val, bool):
+        return val
+    return str(val).strip().lower() in ("1", "true", "yes", "on")
+
+
 def get_int(key: str, default: int = 0) -> int:
     return get_config().get_int(key, default)
 

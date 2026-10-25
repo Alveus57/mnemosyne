@@ -103,3 +103,44 @@ def test_env_values_apply_when_config_omits_the_key(tmp_path):
 
     assert result["base"] == "https://env.example.test/v1"
     assert result["api_model"] is True
+
+
+def test_reading_embedding_config_does_not_seed_config_yaml(tmp_path):
+    """Resolving embedding settings is a read: it must not create config.yaml.
+
+    ``MnemosyneConfig`` seeds a config file on first access, so routing the
+    import-time embedding constants through the shared singleton turned a read
+    into a write and broke read-only commands (doctor asserts its data tree is
+    unchanged) and every test that ran after one of them.
+    """
+    data_dir = tmp_path / "data"
+    data_dir.mkdir()
+    env = {
+        key: value
+        for key, value in os.environ.items()
+        if not key.startswith("MNEMOSYNE_")
+    }
+    env.pop("HERMES_HOME", None)
+    env.pop("OPENAI_API_KEY", None)
+    env["MNEMOSYNE_DATA_DIR"] = str(data_dir)
+    env["HOME"] = str(tmp_path / "home")
+    env["PYTHONPATH"] = str(Path(__file__).resolve().parents[1])
+    script = (
+        "import json\n"
+        "from mnemosyne.core import embeddings as E\n"
+        "from mnemosyne.core import config as C\n"
+        "print(json.dumps({\n"
+        "  'model': E._DEFAULT_MODEL,\n"
+        "  'peek': C.peek('embedding_model'),\n"
+        "  'peek_bool': C.peek_bool('embeddings_via_api'),\n"
+        "}))\n"
+    )
+    completed = subprocess.run(
+        [sys.executable, "-c", script],
+        env=env,
+        cwd=str(tmp_path),
+        capture_output=True,
+        text=True,
+    )
+    assert completed.returncode == 0, completed.stderr
+    assert not (data_dir / "config.yaml").exists()
