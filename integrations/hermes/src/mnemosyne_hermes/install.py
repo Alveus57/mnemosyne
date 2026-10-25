@@ -2,6 +2,18 @@
 
 from __future__ import annotations
 
+import sys
+
+# This installer can also be loaded directly by the core-free console script.
+if sys.platform in {"android", "emscripten"} or (
+    sys.platform == "linux" and hasattr(sys, "getandroidapilevel")
+):
+    _platform_label = "android" if sys.platform == "linux" else sys.platform
+    raise RuntimeError(
+        f"Mnemosyne native Hermes integration is unsupported on {_platform_label}; "
+        "no provider or tools were activated."
+    )
+
 import argparse
 import base64
 import csv
@@ -20,7 +32,6 @@ import shlex
 import shutil
 import stat
 import subprocess
-import sys
 import tempfile
 from dataclasses import dataclass
 from importlib import resources
@@ -1831,11 +1842,22 @@ from __future__ import annotations
 
 import importlib
 import json
+import logging
 import os
 from pathlib import Path
 import re
 import site as site_module
 import sys
+
+# File-loaded entry points cannot rely on a parent package guard.
+if sys.platform in {"android", "emscripten"} or (
+    sys.platform == "linux" and hasattr(sys, "getandroidapilevel")
+):
+    _platform_label = "android" if sys.platform == "linux" else sys.platform
+    raise RuntimeError(
+        f"Mnemosyne native Hermes integration is unsupported on {_platform_label}; "
+        "no provider or tools were activated."
+    )
 
 
 def _guard_selected_site_packages_python_compatibility(selected_site_packages: Path) -> None:
@@ -1867,13 +1889,15 @@ def _guard_selected_site_packages_python_compatibility(selected_site_packages: P
                 if selected_version is not None
                 else "unknown"
             )
-            raise RuntimeError(
+            message = (
                 "Mnemosyne runtime Python compatibility error: "
                 f"runtime Python {runtime_version[0]}.{runtime_version[1]}; "
                 f"selected Mnemosyne environment Python {selected_text}. "
                 "Recreate the Mnemosyne environment using Hermes' Python, "
                 "then reinstall mnemosyne-hermes."
             )
+            logging.getLogger(__name__).warning("%s", message)
+            raise RuntimeError(message)
         return
 
 
@@ -1949,6 +1973,17 @@ def activate() -> dict[str, object]:
     return manifest
 """.replace("__MNEMOSYNE_WRAPPER_MANIFEST_NAME__", repr(WRAPPER_MANIFEST_NAME))
     init_source = """\"\"\"Persistent Mnemosyne Hermes plugin wrapper.\"\"\"
+import sys
+
+if sys.platform in {"android", "emscripten"} or (
+    sys.platform == "linux" and hasattr(sys, "getandroidapilevel")
+):
+    _platform_label = "android" if sys.platform == "linux" else sys.platform
+    raise RuntimeError(
+        f"Mnemosyne native Hermes integration is unsupported on {_platform_label}; "
+        "no provider or tools were activated."
+    )
+
 from ._mnemosyne_bootstrap import activate as _activate
 
 _activate()
@@ -1957,6 +1992,17 @@ _activate()
 from mnemosyne_hermes import *  # noqa: F401,F403,E402
 """
     cli_source = """\"\"\"Hermes CLI wrapper for the selected Mnemosyne package.\"\"\"
+import sys
+
+if sys.platform in {"android", "emscripten"} or (
+    sys.platform == "linux" and hasattr(sys, "getandroidapilevel")
+):
+    _platform_label = "android" if sys.platform == "linux" else sys.platform
+    raise RuntimeError(
+        f"Mnemosyne native Hermes integration is unsupported on {_platform_label}; "
+        "no provider or tools were activated."
+    )
+
 import importlib.util
 from pathlib import Path
 
