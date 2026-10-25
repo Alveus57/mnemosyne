@@ -1,15 +1,13 @@
-"""Mnemosyne Memory Provider for Hermes.
+"""Legacy Mnemosyne Memory Provider for Hermes.
 
-Deploy to Hermes via:
-    ln -s /path/to/mnemosyne/hermes_memory_provider ~/.hermes/plugins/mnemosyne
+The direct source-checkout symlink installation is deprecated. For supported
+Hermes setup, use the standalone ``mnemosyne-hermes`` package and the canonical
+guide at ``../docs/hermes-integration.md`` (relative to this module's directory).
 
-Then set in ~/.hermes/config.yaml:
-    memory:
-      provider: mnemosyne
-
-This gives Mnemosyne first-class MemoryProvider integration (system prompt
-injection, pre-turn prefetch, post-turn sync, tool dispatch) while remaining
-a standalone plugin deployed through the plugin system.
+This legacy package is retained for existing imports. This documentation change
+does not alter runtime behavior, exports or tool schemas. Future removal and
+compatibility boundaries are tracked in #655; no removal date or future shim is
+promised here.
 """
 
 from __future__ import annotations
