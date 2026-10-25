@@ -190,6 +190,18 @@ def cmd_recall(args):
     query = positionals[0]
     top_k = _parse_int(positionals[1], "top_k") if len(positionals) > 1 else 5
 
+    bank = _resolve_bank_name()
+    if bank != "default":
+        # Check before _get_memory: importing memory initializes the default DB,
+        # and BankManager's constructor creates banks/. This is path validation,
+        # not a read-only open; normal recall initialization/bookkeeping remains.
+        from mnemosyne.core.banks import get_bank_db_path_read_only
+
+        try:
+            get_bank_db_path_read_only(bank, data_dir=Path(DATA_DIR))
+        except (ValueError, FileNotFoundError) as error:
+            _fail(str(error))
+
     mem = _get_memory()
     payload = mem.recall(query, top_k=top_k, explain=explain)
     if explain:
@@ -337,6 +349,19 @@ def cmd_stats(args):
 
 def cmd_sleep(args):
     """Run consolidation cycle."""
+    for arg in args:
+        if arg not in {"--force", "-f", "--all-sessions", "--dry-run", "--help", "-h"}:
+            _fail(f"Unknown sleep option: {arg}")
+    if "--help" in args or "-h" in args:
+        print("Usage: mnemosyne sleep [--force|-f] [--all-sessions] [--dry-run]")
+        print("Alias: consolidate")
+        print("  --force, -f     Force consolidation")
+        print("  --all-sessions  Consolidate across all sessions")
+        print("  --dry-run       Preview consolidation without applying it")
+        print("  --help, -h      Show this help")
+        return
+
+    os.makedirs(DATA_DIR, exist_ok=True)
     mem = _get_memory()
     force = "--force" in args or "-f" in args
     all_sessions = "--all-sessions" in args
@@ -2078,7 +2103,7 @@ def run_cli():
         # machine-readable code, never a traceback (which leaks absolute
         # paths and library internals into logs).
         try:
-            if command not in {"doctor", "repair", "reindex", "backup", "restore"}:
+            if command not in {"doctor", "repair", "reindex", "backup", "restore", "sleep", "consolidate"}:
                 os.makedirs(DATA_DIR, exist_ok=True)
             handler(sys.argv[2:])
         except SystemExit:
