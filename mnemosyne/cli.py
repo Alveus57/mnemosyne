@@ -1867,6 +1867,7 @@ def cmd_config(args):
         key = rest[0]
         value = rest[1]
         config = get_config()
+        config.ensure_seeded()
         config.set(key, value)
         print(f"Set {key} = {value}")
         from mnemosyne.core.config import REQUIRES_RESTART
@@ -1875,6 +1876,7 @@ def cmd_config(args):
 
     elif sub == "migrate":
         config = get_config()
+        config.ensure_seeded()
         migrated = config.migrate_from_env()
         print(f"Migrated {len(migrated)} env vars to config.yaml:")
         for key in migrated:
