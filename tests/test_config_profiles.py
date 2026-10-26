@@ -17,17 +17,13 @@ import pytest
 
 from mnemosyne.core.config import (
     ENV_VAR_MAP,
-    REQUIRES_RESTART,
     MnemosyneConfig,
-    get_config,
 )
 from mnemosyne.core.profiles import (
     PROFILES,
     TEMPLATE_KEYS,
     validate_profile,
     validate_all_profiles,
-    list_profiles,
-    get_profile,
     apply_profile,
     create_profile,
 )
