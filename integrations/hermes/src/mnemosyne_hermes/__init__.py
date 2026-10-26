@@ -5040,7 +5040,11 @@ class MnemosyneMemoryProvider(HermesPersonaPromptMixin, MemoryProvider):
                             "episodic_memory": cur.execute("SELECT COUNT(*) FROM episodic_memory").fetchone()[0],
                             "facts": cur.execute("SELECT COUNT(*) FROM facts").fetchone()[0],
                         }
-                        result["active_provider_orphan_diagnostics"] = _memory_orphan_diagnostics(con)
+                        result["active_provider_orphan_diagnostics"] = {
+                            **_memory_orphan_diagnostics(con),
+                            # PRAGMA foreign_keys is connection-local, not DB state.
+                            "foreign_keys_connection": "separate_diagnostic_connection",
+                        }
                     finally:
                         con.close()
                     try:
