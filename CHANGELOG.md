@@ -7,6 +7,8 @@ and this project adheres to [SemVer](https://semver.org/) starting from v3.1.2.
 
 ## [Unreleased]
 
+## [4.0.0] - 2026-10-26
+
 ### Fixed
 - **Standalone Hermes diagnostics identify the foreign-key setting's connection (#1248).** `active_provider_orphan_diagnostics.foreign_keys_connection` now explicitly labels the existing `foreign_keys_enabled` value as belonging to a separate diagnostic connection, not the active BEAM connection. Existing numeric fields, enforcement settings, schema, stored data, and connection lifecycle are unchanged.
 - **Reading config no longer creates `config.yaml`.** `MnemosyneConfig` seeded the file on first access, so every read was also a write: read-only commands grew a file in the data tree (doctor asserts it does not), and the seed snapshotted the process environment into a file that then outranked later environment changes for the rest of the process. Seeding now happens only when a config command materializes the file (`config set`, `config migrate`), through `MnemosyneConfig.ensure_seeded()`.
