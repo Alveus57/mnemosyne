@@ -8,6 +8,8 @@ import sqlite3
 
 import pytest
 
+import mnemosyne_hermes
+from mnemosyne.core.llm_backends import get_host_llm_backend
 from mnemosyne_hermes import MnemosyneMemoryProvider
 
 
@@ -42,10 +44,47 @@ def provider(tmp_path, monkeypatch):
     instance = MnemosyneMemoryProvider()
     instance.initialize("diagnose-provenance", hermes_home=str(tmp_path), agent_identity="test")
     assert instance._beam is not None
+    conn = instance._beam.conn
     try:
         yield instance
     finally:
-        instance._beam.conn.close()
+        try:
+            instance.shutdown()
+        finally:
+            conn.close()
+
+
+def test_provider_fixture_releases_lifecycle_state(tmp_path, monkeypatch):
+    before = (
+        mnemosyne_hermes._active_provider_count,
+        mnemosyne_hermes._host_llm_owner_count,
+        mnemosyne_hermes._provider_active,
+    )
+    lifecycle = provider.__wrapped__(tmp_path, monkeypatch)
+    instance = next(lifecycle)
+    conn = instance._beam.conn
+    try:
+        assert instance._is_active_in_module
+        assert instance._owns_host_llm_backend
+        assert mnemosyne_hermes._active_provider_count == before[0] + 1
+        assert mnemosyne_hermes._host_llm_owner_count == before[1] + 1
+        assert get_host_llm_backend() is not None
+    finally:
+        with pytest.raises(StopIteration):
+            next(lifecycle)
+
+    assert (
+        mnemosyne_hermes._active_provider_count,
+        mnemosyne_hermes._host_llm_owner_count,
+        mnemosyne_hermes._provider_active,
+    ) == before
+    assert not instance._is_active_in_module
+    assert not instance._owns_host_llm_backend
+    assert instance._beam is None
+    if before[1] == 0:
+        assert get_host_llm_backend() is None
+    with pytest.raises(sqlite3.ProgrammingError, match="closed database"):
+        conn.execute("SELECT 1")
 
 
 @pytest.mark.parametrize("active_fk", [0, 1], ids=["active-off", "active-on"])
