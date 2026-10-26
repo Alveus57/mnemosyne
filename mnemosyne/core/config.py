@@ -387,12 +387,27 @@ class MnemosyneConfig:
         self._yaml_mtime: float = 0.0
         self._yaml_lock = threading.Lock()
 
-        # Auto-seed config.yaml on first access if it doesn't exist
-        if not self._config_path.exists():
-            self._seed()
-        else:
+        # Reads never create config.yaml. Seeding on first access turned every
+        # read into a write: read-only commands grew a file in the data tree,
+        # and the seed snapshotted the process env into a file that then
+        # outranked later env changes for the rest of the process. Writers
+        # call ensure_seeded() (see cmd_config set/migrate).
+        if self._config_path.exists():
             self._warn_legacy_provider_defaults()
 
+        self._load_yaml()
+
+    def ensure_seeded(self) -> None:
+        """Materialize config.yaml with documented defaults, for writers only.
+
+        Idempotent: an existing file is left untouched. Values come from the
+        current env where set, otherwise the hardcoded defaults, so the file
+        records what is already running instead of overriding it.
+        """
+        if self._config_path.exists():
+            return
+        self._seed()
+        self._yaml_mtime = 0.0
         self._load_yaml()
 
     @classmethod
