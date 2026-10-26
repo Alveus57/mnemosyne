@@ -378,9 +378,59 @@ def test_killed_mutation_restores_exact_baseline(tmp_path, operation, boundary):
     _assert_scenario(tmp_path, operation, boundary, vector=False)
 
 
+_VECTOR_PREREQUISITES = """
+import sqlite3
+import sys
+
+for package in ("numpy", "sqlite_vec"):
+    try:
+        __import__(package)
+    except ModuleNotFoundError as exc:
+        if exc.name != package:
+            raise
+        print("missing optional package: " + package)
+        sys.exit(77)
+import sqlite_vec
+
+with sqlite3.connect(":memory:") as conn:
+    if not hasattr(conn, "enable_load_extension"):
+        print("SQLite extension loading is unavailable")
+        sys.exit(77)
+    try:
+        conn.enable_load_extension(True)
+    except sqlite3.NotSupportedError:
+        print("SQLite extension loading is unsupported")
+        sys.exit(77)
+    except sqlite3.OperationalError as exc:
+        if str(exc) != "not authorized":
+            raise
+        print("SQLite extension loading is not authorized")
+        sys.exit(77)
+    try:
+        sqlite_vec.load(conn)
+    finally:
+        conn.enable_load_extension(False)
+    assert conn.execute("SELECT vec_version()").fetchone()[0]
+    conn.execute("CREATE VIRTUAL TABLE probe USING vec0(embedding float[3])")
+"""
+
+
+def _require_vector_prerequisites(tmp_path):
+    # Separate directories avoid _child_env's deliberately non-idempotent mkdir.
+    # Use the writer's exact environment policy, not the parent's user-site.
+    probe_path = tmp_path / "vector-prerequisites"
+    probe_path.mkdir()
+    probe = subprocess.run(
+        [sys.executable, "-c", _VECTOR_PREREQUISITES], cwd=_REPO_ROOT,
+        env=_child_env(probe_path), capture_output=True, text=True, timeout=30,
+    )
+    if probe.returncode == 77:
+        pytest.skip(probe.stdout.strip())
+    assert probe.returncode == 0, probe.stdout + probe.stderr
+
+
 @pytest.mark.skipif(os.name != "posix", reason="requires SIGKILL and selectable pipes")
 @pytest.mark.parametrize("operation", ["remember", "update", "forget", "batch"])
 def test_killed_active_vector_mutation_restores_exact_baseline(tmp_path, operation):
-    pytest.importorskip("numpy")
-    pytest.importorskip("sqlite_vec")
+    _require_vector_prerequisites(tmp_path)
     _assert_scenario(tmp_path, operation, "precommit", vector=True)
