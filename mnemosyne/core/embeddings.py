@@ -267,6 +267,11 @@ def _get_embedding_dim(model_name: str) -> int:
     # auto-seeded 384 is the default, not an explicit override for a model
     # that declares another dimension.
     configured_dim = _cfg("embedding_dim")
+    if isinstance(configured_dim, str):
+        # A blank value (spaces/tab, routine in Compose and CI matrices) means
+        # unset here too, whether it arrived from config.yaml or from the env
+        # fallback that peek() applies.
+        configured_dim = configured_dim.strip()
     if configured_dim not in (None, ""):
         try:
             value = int(configured_dim)
