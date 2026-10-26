@@ -111,6 +111,16 @@ release gates](PLATFORM_SUPPORT.md). A guard-bearing standalone release and a
 catalog floor requiring that actually published version remain shipping gates;
 this source change does not retrofit published `0.7.6` or existing wrappers.
 
+## Diagnostic connection provenance
+
+`mnemosyne_diagnose` reports orphan counts for the active provider's database in
+`active_provider_orphan_diagnostics`. Its `foreign_keys_enabled` integer describes
+SQLite's connection-local setting on the separate diagnostic connection, **not**
+the active BEAM connection. The additive `foreign_keys_connection` field is
+`"separate_diagnostic_connection"`; existing count fields and values are unchanged.
+A value of `0` here does not establish disabled enforcement on BEAM or database
+corruption. Diagnostics do not change either connection's foreign-key setting.
+
 ## How It Works
 
 Mnemosyne runs on three stages:
