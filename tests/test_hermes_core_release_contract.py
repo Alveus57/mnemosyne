@@ -21,10 +21,9 @@ except ImportError:  # Python 3.10
 
 ROOT = Path(__file__).resolve().parents[1]
 CORE_INIT = ROOT / "mnemosyne" / "__init__.py"
-HERMES_PROJECTS = (
-    ROOT / "integrations" / "hermes" / "pyproject.toml",
-    ROOT / "integrations" / "hermes-catalog" / "pyproject.toml",
-)
+STANDALONE_PROJECT = ROOT / "integrations" / "hermes" / "pyproject.toml"
+CATALOG_PROJECT = ROOT / "integrations" / "hermes-catalog" / "pyproject.toml"
+STANDALONE_CORE_FLOOR = "4.0.0b6"
 LEGACY_HERMES_MANIFEST = ROOT / "integrations" / "hermes" / "plugin.yaml"
 CORE_HERMES_MANIFEST = ROOT / "hermes_memory_provider" / "plugin.yaml"
 REQUIRED_CORE_API = (
@@ -64,11 +63,14 @@ def _mnemosyne_memory_specs(project: Path) -> list[str]:
     return [spec for spec in specs if re.match(r"mnemosyne-memory(?:\[[^]]+\])?", spec)]
 
 
-def test_hermes_packages_require_the_current_core_api_release() -> None:
-    """Require every Hermes package surface to pin the current core API release."""
+def test_hermes_packages_require_their_supported_core_api_release() -> None:
+    """Standalone prerelease support and catalog promotion have separate floors."""
     core_version = _core_version()
     parsed_version = Version(core_version)
-    for project in HERMES_PROJECTS:
+    for project, floor in (
+        (STANDALONE_PROJECT, STANDALONE_CORE_FLOOR),
+        (CATALOG_PROJECT, core_version),
+    ):
         specs = _mnemosyne_memory_specs(project)
         assert specs, project
         for spec in specs:
@@ -79,15 +81,25 @@ def test_hermes_packages_require_the_current_core_api_release() -> None:
                 spec,
             )
             assert any(
-                item.operator == ">=" and item.version == core_version
+                item.operator == ">=" and item.version == floor
                 for item in requirement.specifier
-            ), (project, core_version, spec)
-    assert f"mnemosyne-memory>={core_version}" in LEGACY_HERMES_MANIFEST.read_text(
+            ), (project, floor, spec)
+    assert f"mnemosyne-memory>={STANDALONE_CORE_FLOOR}" in LEGACY_HERMES_MANIFEST.read_text(
         encoding="utf-8"
     )
     assert f"version: {core_version}" in CORE_HERMES_MANIFEST.read_text(
         encoding="utf-8"
     )
+
+
+def test_standalone_core_requirements_admit_rc1_without_admitting_older_betas() -> None:
+    """Every extra must retain the tested b6 floor and admit rc1/final."""
+    for spec in _mnemosyne_memory_specs(STANDALONE_PROJECT):
+        requirement = Requirement(spec)
+        for version in ("4.0.0b6", "4.0.0rc1", "4.0.0"):
+            assert Version(version) in requirement.specifier, (spec, version)
+        for version in ("3.15.1", "4.0.0b5"):
+            assert Version(version) not in requirement.specifier, (spec, version)
 
 
 def test_hermes_required_core_api_is_present() -> None:
