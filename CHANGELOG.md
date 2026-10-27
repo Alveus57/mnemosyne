@@ -7,6 +7,14 @@ and this project adheres to [SemVer](https://semver.org/) starting from v3.1.2.
 
 ## [Unreleased]
 
+### Standalone Hermes 0.7.7 (prepared, not published)
+- Adds explicit, consent-based legacy PM adoption preserving exact package versions and chosen extras (#1217); this is partial work for #1169, which remains open pending release acceptance.
+- Reports PM ownership from installation metadata without importing Core or claiming runtime/autosave health (#1223).
+- Releases worker-thread SQLite handles through the side-effect-free Core cleanup API (#1228); requires Core >=4.0.0b6 across base and optional dependencies, admitting rc1 and final.
+- Refuses excluded Android/Emscripten native entry paths before activation (#1230), and logs wrapper Python mismatch diagnostics (#635).
+- Clarifies media-hint ownership (#1225), foreign-key diagnostic connection provenance (#1248), and durable-memory guidance (#835).
+- Synchronizes the standalone runtime, package and both manifests at 0.7.7. Core version and catalog pins are unchanged; publication and downstream alignment remain maintainer actions.
+
 ## [4.0.0] - 2026-10-26
 
 ### Fixed
