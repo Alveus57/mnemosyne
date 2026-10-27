@@ -177,7 +177,7 @@ def _cleanup_committed_pending_claim(claim_path: Path) -> Optional[str]:
 
 from datetime import datetime, timedelta, timezone
 
-# Mnemosyne core is installed via pip (mnemosyne-memory>=3.11.1 dependency),
+# Mnemosyne core is installed via the declared package dependency,
 # but keep imports lazy so installer/status CLI commands still work in broken
 # or partially-installed environments.
 try:

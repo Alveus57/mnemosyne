@@ -135,6 +135,7 @@ def _manifest_version_from_wheel(archive: zipfile.ZipFile, path: str) -> str:
 
 
 def test_all_plugin_manifests_have_an_explicit_version_contract():
+    """Each manifest follows its owning Core, standalone or catalog project."""
     core_version = _assignment_version(ROOT / "mnemosyne" / "__init__.py")
     hermes_root = ROOT / "integrations" / "hermes"
     hermes_version = _assignment_version(
@@ -164,9 +165,7 @@ def test_catalog_provider_range_admits_the_prepared_standalone_release():
     assert len(specs) == 1
     requirement = Requirement(specs[0])
     provider_version = _project_version(ROOT / "integrations" / "hermes" / "pyproject.toml")
-    wrapper_version = _project_version(ROOT / "integrations" / "hermes-catalog" / "pyproject.toml")
     assert provider_version in requirement.specifier
-    assert wrapper_version in requirement.specifier
     assert "0.8.0" not in requirement.specifier
 
 
