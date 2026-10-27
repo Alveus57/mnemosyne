@@ -24,7 +24,7 @@ ROOT = Path(__file__).resolve().parents[1]
 CORE_INIT = ROOT / "mnemosyne" / "__init__.py"
 STANDALONE_PROJECT = ROOT / "integrations" / "hermes" / "pyproject.toml"
 CATALOG_PROJECT = ROOT / "integrations" / "hermes-catalog" / "pyproject.toml"
-STANDALONE_CORE_FLOOR = "4.0.0b6"
+STANDALONE_CORE_FLOOR = "4.0.0"
 LEGACY_HERMES_MANIFEST = ROOT / "integrations" / "hermes" / "plugin.yaml"
 CORE_HERMES_MANIFEST = ROOT / "hermes_memory_provider" / "plugin.yaml"
 REQUIRED_CORE_API = (
@@ -110,13 +110,13 @@ def test_hermes_packages_require_their_supported_core_api_release() -> None:
     )
 
 
-def test_standalone_core_requirements_admit_rc1_without_admitting_older_betas() -> None:
-    """Every extra must retain the tested b6 floor and admit rc1/final."""
+def test_standalone_core_requirements_admit_final_without_admitting_betas() -> None:
+    """Every extra must require Core 4.0.0 final, so no install pairs 0.7.7 with a beta."""
     for requirements in _mnemosyne_memory_specs(STANDALONE_PROJECT).values():
         for requirement in requirements:
-            for version in ("4.0.0b6", "4.0.0rc1", "4.0.0"):
+            for version in ("4.0.0", "4.0.1"):
                 assert Version(version) in requirement.specifier, (requirement, version)
-            for version in ("3.15.1", "4.0.0b5"):
+            for version in ("3.15.1", "4.0.0b5", "4.0.0b6", "4.0.0rc1"):
                 assert Version(version) not in requirement.specifier, (requirement, version)
 
 

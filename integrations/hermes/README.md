@@ -193,17 +193,17 @@ so cleanup also runs when the sleep pass fails. The release goes through
 `mnemosyne.core.memory` (whose import-time `init_db()` would open a default
 connection and displace the worker's handle), it is fail-soft like the rest of
 the lifecycle, and a handle whose `close()` raised stays cached so a later call
-can retry. The module ships in Core `4.0.0b6`, the minimum required by the
-prepared standalone `0.7.7` package. Legacy pairs retained through explicit
+can retry. The module first shipped in Core `4.0.0b6`; the standalone `0.7.7` package
+requires Core `4.0.0` final. Legacy pairs retained through explicit
 adoption can predate that module; their cleanup keeps the fail-soft fallback.
 
 ---
 
-## Prepared standalone release 0.7.7
+## Standalone release 0.7.7
 
-This candidate includes the explicit legacy PM adoption path from #1217. It is
-not yet published. The minimum Core is `4.0.0b6`; this requirement also admits
-`4.0.0rc1` and `4.0.0` final. Every optional Core extra uses the same floor.
+This release includes the explicit legacy PM adoption path from #1217. The
+minimum Core is `4.0.0` final, and every optional Core extra uses the same floor,
+so a fresh install never pairs this provider with a beta.
 Adoption retains the verified prior package pair and does not upgrade it to Core 4.
 Release-artifact acceptance and the #1169 gate remain separate from preparation.
 
@@ -461,8 +461,8 @@ Both the standalone `mnemosyne_hermes` provider and the bundled
 `hermes_memory_provider` copy expose the same `dry_run`/`llm_eval` resolver
 arguments during migration; this is not a recommendation to install the bundled
 copy. The existing core `BeamMemory.resolve_cross_session_conflicts` signature
-supports both arguments. The current minimum core/provider pair is core 4.0.0b6
-and provider 0.7.6; no fallback retry against an incompatible core signature is performed.
+supports both arguments. The current minimum core/provider pair is core 4.0.0
+and provider 0.7.7; no fallback retry against an incompatible core signature is performed.
 
 An explicit LLM preview overrides `MNEMOSYNE_LLM_CONFLICT_DETECTION` for that
 preview only, never the default-off cross-session gate. Apply still honors the
