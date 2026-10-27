@@ -92,6 +92,9 @@ def test_hermes_packages_require_their_supported_core_api_release() -> None:
             specs = requirements.get(group, [])
             _assert_core_requirement(specs, f"mnemosyne-memory[{extra}]>={floor}")
             requirement = specs[0]
+            if project == STANDALONE_PROJECT:
+                # Core is mandatory on every supported standalone environment.
+                assert requirement.marker is None, (group, requirement)
             assert parsed_version in requirement.specifier, (
                 project,
                 core_version,
