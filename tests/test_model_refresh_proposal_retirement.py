@@ -152,7 +152,7 @@ class TestResolvedProposalRetirement:
         even fall back to the working-memory scan.
         """
         beam = BeamMemory(session_id="retire", db_path=tmp_path / "mnemo.db")
-        retired = [_store_proposal(beam, f"budget{i}") for i in range(12)]
+        retired = [_store_proposal(beam, f"budget{i}") for i in range(30)]
         for proposal_id in retired:
             model_refresh.reject_model_refresh_proposal(beam, proposal_id, reason="bulk")
         survivor = _store_proposal(beam, "budget_survivor")
@@ -163,11 +163,11 @@ class TestResolvedProposalRetirement:
         assert not (ids & set(retired))
 
     def test_retired_rows_do_not_consume_the_cjk_scan_budget(self, tmp_path):
-        """The LIKE fallback scans before the caller filters; it must filter too."""
+        """The LIKE fallback scans k*5 rows; retired ones must not use that budget."""
         beam = BeamMemory(session_id="retire", db_path=tmp_path / "mnemo.db")
         retired = [
             _store_proposal(beam, f"cjk{i}", body=f"測試報告 内容 {i}")
-            for i in range(12)
+            for i in range(30)
         ]
         for proposal_id in retired:
             model_refresh.reject_model_refresh_proposal(beam, proposal_id, reason="bulk")
@@ -182,7 +182,7 @@ class TestResolvedProposalRetirement:
         beam = BeamMemory(session_id="retire", db_path=tmp_path / "mnemo.db")
         retired = [
             _store_proposal(beam, f"cyr{i}", body=f"проверка памяти номер {i}")
-            for i in range(12)
+            for i in range(30)
         ]
         for proposal_id in retired:
             model_refresh.reject_model_refresh_proposal(beam, proposal_id, reason="bulk")
