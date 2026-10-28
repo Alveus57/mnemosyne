@@ -19,7 +19,12 @@ from __future__ import annotations
 
 import json
 
-from mnemosyne.core.beam import BeamMemory, _fts_search_working
+from mnemosyne.core.beam import (
+    BeamMemory,
+    _cjk_like_search,
+    _cyrillic_like_search,
+    _fts_search_working,
+)
 from mnemosyne.core import model_refresh
 
 
@@ -153,6 +158,37 @@ class TestResolvedProposalRetirement:
         survivor = _store_proposal(beam, "budget_survivor")
 
         ids = {row["id"] for row in _fts_search_working(beam.conn, "retirement budget", k=5)}
+
+        assert survivor in ids
+        assert not (ids & set(retired))
+
+    def test_retired_rows_do_not_consume_the_cjk_scan_budget(self, tmp_path):
+        """The LIKE fallback scans before the caller filters; it must filter too."""
+        beam = BeamMemory(session_id="retire", db_path=tmp_path / "mnemo.db")
+        retired = [
+            _store_proposal(beam, f"cjk{i}", body=f"測試報告 内容 {i}")
+            for i in range(12)
+        ]
+        for proposal_id in retired:
+            model_refresh.reject_model_refresh_proposal(beam, proposal_id, reason="bulk")
+        survivor = _store_proposal(beam, "cjk_survivor", body="測試報告 内容 bewaard")
+
+        ids = {row["id"] for row in _cjk_like_search(beam.conn, "測試報告", k=5, working=True)}
+
+        assert survivor in ids
+        assert not (ids & set(retired))
+
+    def test_retired_rows_do_not_consume_the_cyrillic_scan_budget(self, tmp_path):
+        beam = BeamMemory(session_id="retire", db_path=tmp_path / "mnemo.db")
+        retired = [
+            _store_proposal(beam, f"cyr{i}", body=f"проверка памяти номер {i}")
+            for i in range(12)
+        ]
+        for proposal_id in retired:
+            model_refresh.reject_model_refresh_proposal(beam, proposal_id, reason="bulk")
+        survivor = _store_proposal(beam, "cyr_survivor", body="проверка памяти сохранена")
+
+        ids = {row["id"] for row in _cyrillic_like_search(beam.conn, "проверка памяти", k=5, working=True)}
 
         assert survivor in ids
         assert not (ids & set(retired))

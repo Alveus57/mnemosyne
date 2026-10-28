@@ -5323,10 +5323,13 @@ def _cjk_like_search(conn: sqlite3.Connection, query: str, k: int = 20, working:
     # Build parameterized LIKE clauses for each CJK character
     conditions = " OR ".join("content LIKE ? ESCAPE '\\'" for _ in cjk_chars)
     params = [f"%{ch}%" for ch in cjk_chars]
+    # Working rows that were retired (superseded_by set) stay in the table for
+    # audit; they must not consume the scan budget before the caller filters.
+    eligibility = " AND superseded_by IS NULL" if working else ""
     # Also search for mixed CJK+ASCII: any of the CJK chars must be present
     try:
         all_rows = conn.execute(
-            f"SELECT {id_col}, content FROM {table} WHERE {conditions} LIMIT ?",
+            f"SELECT {id_col}, content FROM {table} WHERE ({conditions}){eligibility} LIMIT ?",
             params + [k * 5]
         ).fetchall()
     except Exception:
@@ -5486,9 +5489,12 @@ def _cyrillic_like_search(
         ["_py_lower(content) LIKE ? ESCAPE '\\'"] * len(q_words)
     )
     params = [f"%{w[:4].lower()}%" for w in q_words]
+    # See _cjk_like_search: retired working rows must leave the pool before
+    # the scan limit, not after it.
+    eligibility = " AND superseded_by IS NULL" if working else ""
     try:
         all_rows = conn.execute(
-            f"SELECT {id_col}, content FROM {table} WHERE {conditions} LIMIT ?",
+            f"SELECT {id_col}, content FROM {table} WHERE ({conditions}){eligibility} LIMIT ?",
             params + [k * 5],
         ).fetchall()
     except Exception:
