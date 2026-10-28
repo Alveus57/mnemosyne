@@ -18,8 +18,6 @@ from __future__ import annotations
 
 import json
 
-import pytest
-
 from mnemosyne.core.beam import BeamMemory
 from mnemosyne.core import model_refresh
 
