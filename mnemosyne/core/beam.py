@@ -5517,8 +5517,15 @@ def _fts_staged_rows(
     query: str,
     k: int,
     expansion_terms: List[str],
+    eligibility_sql: str = "",
 ) -> List[Dict]:
     """Fill the bounded candidate budget with exact hits before expansions.
+
+    ``eligibility_sql`` optionally supplies an ``id IN (SELECT ...)``
+    subquery that is applied inside every stage, before that stage's LIMIT.
+    Callers that filter rows out afterwards must pass it here instead: with
+    a bounded pool, ineligible rows would otherwise consume the budget and
+    push eligible rows out of the candidate set entirely.
 
     The pool handed to Python is capped (``LIMIT k``), so a single MATCH over
     ``exact OR prefix`` lets the prefix branch spend the whole budget on rows
@@ -5557,8 +5564,9 @@ def _fts_staged_rows(
     literal hits without enlarging the pool. Thirds and halves need no
     per-corpus constant.
     """
+    extra_sql = f" AND {id_col} IN ({eligibility_sql})" if eligibility_sql else ""
     match_sql = (
-        f"SELECT {id_col}, rank FROM {table} WHERE {table} MATCH ?"
+        f"SELECT {id_col}, rank FROM {table} WHERE {table} MATCH ?{extra_sql}"
         f" ORDER BY rank, {id_col} LIMIT ?"
     )
     precise_terms = _fts_precise_terms(query)
@@ -5590,7 +5598,7 @@ def _fts_staged_rows(
     placeholders = ",".join("?" * len(ordered_ids))
     rank_rows = conn.execute(
         f"SELECT {id_col}, rank FROM {table}"
-        f" WHERE {table} MATCH ? AND {id_col} IN ({placeholders})",
+        f" WHERE {table} MATCH ? AND {id_col} IN ({placeholders}){extra_sql}",
         (" OR ".join(expansion_terms), *ordered_ids),
     ).fetchall()
     ranks = {r[id_col]: r["rank"] for r in rank_rows}
@@ -5640,7 +5648,17 @@ def _fts_search_working(conn: sqlite3.Connection, query: str, k: int = 20) -> Li
         if _has_cyrillic(query):
             return _cyrillic_like_search(conn, query, k=k, working=True)
         return []
-    rows = _fts_staged_rows(conn, "fts_working", "id", query, k, terms)
+    rows = _fts_staged_rows(
+        conn,
+        "fts_working",
+        "id",
+        query,
+        k,
+        terms,
+        # Retired rows stay in fts_working (the row is kept for audit), so
+        # they must leave the candidate pool before its LIMIT, not after it.
+        eligibility_sql="SELECT id FROM working_memory WHERE superseded_by IS NULL",
+    )
     if not rows and _has_cjk(query):
         return _cjk_like_search(conn, query, k=k, working=True)
     if not rows and _has_cyrillic(query):
