@@ -349,6 +349,25 @@ def _save_metadata(beam, proposal_id: str, metadata: Dict[str, Any]) -> None:
     beam.conn.commit()
 
 
+def _retire_proposal_row(beam, proposal_id: str, status: str) -> None:
+    """Retire a resolved proposal so recall stops surfacing it.
+
+    Proposals are persisted as ``working_memory`` rows and never consolidated,
+    so the recall predicate ``superseded_by IS NULL`` keeps returning them
+    after they have been applied or rejected. Setting ``superseded_by`` on
+    resolution keeps the row available for audit while taking it out of
+    recall; pending proposals are untouched.
+    """
+
+    beam.conn.execute(
+        "UPDATE working_memory SET superseded_by = ? "
+        "WHERE id = ? AND source = ? AND superseded_by IS NULL",
+        (f"model_refresh:{status}", proposal_id, PROPOSAL_SOURCE),
+    )
+    beam.conn.commit()
+
+
+
 def list_model_refresh_proposals(
     beam,
     *,
@@ -413,6 +432,7 @@ def apply_model_refresh_proposal(
     metadata["canonical_id"] = canonical.get("id")
     metadata["auto_applied"] = bool(auto_applied)
     _save_metadata(beam, proposal_id, metadata)
+    _retire_proposal_row(beam, proposal_id, "applied")
     return {"status": "applied", "proposal_id": proposal_id, "canonical": canonical, "metadata": metadata}
 
 
@@ -433,6 +453,7 @@ def reject_model_refresh_proposal(
     metadata["rejected_by"] = validator or "system"
     metadata["rejection_reason"] = reason
     _save_metadata(beam, proposal_id, metadata)
+    _retire_proposal_row(beam, proposal_id, "rejected")
     return {"status": "rejected", "proposal_id": proposal_id, "metadata": metadata}
 
 
